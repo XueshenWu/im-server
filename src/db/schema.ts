@@ -54,6 +54,26 @@ export const syncLog = pgTable('sync_log', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
 });
 
+// Collections table
+export const collections = pgTable('collections', {
+  id: serial('id').primaryKey(),
+  uuid: uuid('uuid').defaultRandom().unique().notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  coverImageId: integer('cover_image_id').references(() => images.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+});
+
+// Image-Collection junction table (many-to-many)
+export const imageCollections = pgTable('image_collections', {
+  id: serial('id').primaryKey(),
+  imageId: integer('image_id').references(() => images.id, { onDelete: 'cascade' }).notNull(),
+  collectionId: integer('collection_id').references(() => collections.id, { onDelete: 'cascade' }).notNull(),
+  addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // Relations
 export const imagesRelations = relations(images, ({ one, many }) => ({
   exifData: one(exifData, {
@@ -61,6 +81,7 @@ export const imagesRelations = relations(images, ({ one, many }) => ({
     references: [exifData.imageId],
   }),
   syncLogs: many(syncLog),
+  imageCollections: many(imageCollections),
 }));
 
 export const exifDataRelations = relations(exifData, ({ one }) => ({
@@ -77,6 +98,25 @@ export const syncLogRelations = relations(syncLog, ({ one }) => ({
   }),
 }));
 
+export const collectionsRelations = relations(collections, ({ one, many }) => ({
+  coverImage: one(images, {
+    fields: [collections.coverImageId],
+    references: [images.id],
+  }),
+  imageCollections: many(imageCollections),
+}));
+
+export const imageCollectionsRelations = relations(imageCollections, ({ one }) => ({
+  image: one(images, {
+    fields: [imageCollections.imageId],
+    references: [images.id],
+  }),
+  collection: one(collections, {
+    fields: [imageCollections.collectionId],
+    references: [collections.id],
+  }),
+}));
+
 // Types
 export type Image = typeof images.$inferSelect;
 export type NewImage = typeof images.$inferInsert;
@@ -86,3 +126,9 @@ export type NewExifData = typeof exifData.$inferInsert;
 
 export type SyncLog = typeof syncLog.$inferSelect;
 export type NewSyncLog = typeof syncLog.$inferInsert;
+
+export type Collection = typeof collections.$inferSelect;
+export type NewCollection = typeof collections.$inferInsert;
+
+export type ImageCollection = typeof imageCollections.$inferSelect;
+export type NewImageCollection = typeof imageCollections.$inferInsert;

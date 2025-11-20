@@ -3,7 +3,9 @@ services:
     image: postgres:16-alpine
     container_name: image-mgmt-db
     environment:
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
     ports:
       - "5430:5432"
     volumes:
@@ -18,6 +20,23 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: image-mgmt-redis
+    ports:
+      - "6370:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local

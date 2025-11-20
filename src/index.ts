@@ -7,16 +7,21 @@ import { swaggerSpec } from './config/swagger';
 import { errorHandler } from './middleware/errorHandler';
 import imagesRoutes from './routes/images.routes';
 import healthRoutes from './routes/health.routes';
+import collectionsRoutes from './routes/collections.routes';
 import 'dotenv/config';
 
 const app: Application = express();
 const PORT = process.env.API_PORT || 3000;
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin images
+  crossOriginEmbedderPolicy: false, // Disable for Electron compatibility
+}));
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   credentials: true,
+  exposedHeaders: ['Content-Length', 'Content-Type'],
 }));
 app.use(morgan('dev'));
 app.use(express.json());
@@ -29,12 +34,18 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'Image Management API Docs',
 }));
 
-// Serve static files for uploaded images and thumbnails
-app.use('/storage', express.static('storage'));
+// Serve static files for uploaded images and thumbnails with CORS headers
+app.use('/storage', (_req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static('storage'));
 
 // Routes
 app.use('/api/health', healthRoutes);
 app.use('/api/images', imagesRoutes);
+app.use('/api/collections', collectionsRoutes);
 
 // Root endpoint - redirect to API docs
 app.get('/', (req, res) => {

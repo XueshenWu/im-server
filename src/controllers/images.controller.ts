@@ -10,6 +10,7 @@ import {
   createImageWithExif,
   getImageByHash,
 } from '../db/queries';
+import { getPaginatedImages, getPaginatedImagesWithExif, getPagePaginatedImages, getPagePaginatedImagesWithExif } from '../db/pagination.queries';
 import { AppError } from '../middleware/errorHandler';
 import {
   processImage,
@@ -220,6 +221,68 @@ export class ImagesController {
     res.status(501).json({
       success: false,
       message: 'Batch upload endpoint not yet implemented',
+    });
+  }
+
+  // Get paginated images with cursor-based pagination
+  async getPaginated(req: Request, res: Response) {
+    const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
+    const cursor = req.query.cursor as string | undefined;
+    const collectionId = req.query.collectionId ? parseInt(req.query.collectionId as string) : undefined;
+    const withExif = req.query.withExif === 'true';
+
+    if (limit && (isNaN(limit) || limit < 1 || limit > 100)) {
+      throw new AppError('Invalid limit. Must be between 1 and 100', 400);
+    }
+
+    if (collectionId && isNaN(collectionId)) {
+      throw new AppError('Invalid collection ID', 400);
+    }
+
+    const result = withExif
+      ? await getPaginatedImagesWithExif({ limit, cursor, collectionId })
+      : await getPaginatedImages({ limit, cursor, collectionId });
+
+    res.json({
+      success: true,
+      count: result.data.length,
+      data: result.data,
+      pagination: {
+        nextCursor: result.nextCursor,
+        hasMore: result.hasMore,
+        limit,
+      },
+    });
+  }
+
+  // Get paginated images with page-based pagination
+  async getPagePaginated(req: Request, res: Response) {
+    const page = req.query.page ? parseInt(req.query.page as string) : 1;
+    const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string) : 20;
+    const collectionId = req.query.collectionId ? parseInt(req.query.collectionId as string) : undefined;
+    const withExif = req.query.withExif === 'true';
+
+    if (page && (isNaN(page) || page < 1)) {
+      throw new AppError('Invalid page number. Must be >= 1', 400);
+    }
+
+    if (pageSize && (isNaN(pageSize) || pageSize < 1 || pageSize > 100)) {
+      throw new AppError('Invalid page size. Must be between 1 and 100', 400);
+    }
+
+    if (collectionId && isNaN(collectionId)) {
+      throw new AppError('Invalid collection ID', 400);
+    }
+
+    const result = withExif
+      ? await getPagePaginatedImagesWithExif({ page, pageSize, collectionId })
+      : await getPagePaginatedImages({ page, pageSize, collectionId });
+
+    res.json({
+      success: true,
+      count: result.data.length,
+      data: result.data,
+      pagination: result.pagination,
     });
   }
 }
