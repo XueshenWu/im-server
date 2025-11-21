@@ -677,6 +677,121 @@ router.delete('/:id', asyncHandler(imagesController.delete));
 
 /**
  * @swagger
+ * /api/images/batch/delete/ids:
+ *   post:
+ *     summary: Batch soft delete images by IDs
+ *     tags: [Images]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - ids
+ *             properties:
+ *               ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Array of image IDs to soft delete
+ *                 example: [1, 2, 3, 4, 5]
+ *     responses:
+ *       200:
+ *         description: Images soft deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deleted:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Image'
+ *                     stats:
+ *                       type: object
+ *                       properties:
+ *                         requested:
+ *                           type: integer
+ *                           description: Number of IDs requested
+ *                         successful:
+ *                           type: integer
+ *                           description: Number of images successfully deleted
+ *                         failed:
+ *                           type: integer
+ *                           description: Number of images that failed to delete
+ *       400:
+ *         description: Invalid request body
+ */
+router.post('/batch/delete/ids', asyncHandler(imagesController.batchDeleteByIds));
+
+/**
+ * @swagger
+ * /api/images/batch/delete/uuids:
+ *   post:
+ *     summary: Batch soft delete images by UUIDs
+ *     tags: [Images]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - uuids
+ *             properties:
+ *               uuids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uuid
+ *                 description: Array of image UUIDs to soft delete
+ *                 example: ["867130af-dbc1-40cd-99f2-fb75baf9b8e1", "f47ac10b-58cc-4372-a567-0e02b2c3d479"]
+ *     responses:
+ *       200:
+ *         description: Images soft deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     deleted:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Image'
+ *                     stats:
+ *                       type: object
+ *                       properties:
+ *                         requested:
+ *                           type: integer
+ *                           description: Number of UUIDs requested
+ *                         successful:
+ *                           type: integer
+ *                           description: Number of images successfully deleted
+ *                         failed:
+ *                           type: integer
+ *                           description: Number of images that failed to delete
+ *       400:
+ *         description: Invalid request body
+ */
+router.post('/batch/delete/uuids', asyncHandler(imagesController.batchDeleteByUuids));
+
+/**
+ * @swagger
  * /api/images/upload:
  *   post:
  *     summary: Upload images

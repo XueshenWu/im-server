@@ -1,4 +1,4 @@
-import { eq, desc, sql, and, isNull } from 'drizzle-orm';
+import { eq, desc, sql, and, isNull, inArray } from 'drizzle-orm';
 import { db } from './index';
 import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyncLog } from './schema';
 
@@ -114,6 +114,36 @@ export async function softDeleteImage(id: number) {
     .returning();
 
   return result[0] || null;
+}
+
+/**
+ * Batch soft delete images by IDs
+ */
+export async function batchSoftDeleteImages(ids: number[]) {
+  if (ids.length === 0) return [];
+
+  const result = await db
+    .update(images)
+    .set({ deletedAt: new Date() })
+    .where(inArray(images.id, ids))
+    .returning();
+
+  return result;
+}
+
+/**
+ * Batch soft delete images by UUIDs
+ */
+export async function batchSoftDeleteImagesByUuid(uuids: string[]) {
+  if (uuids.length === 0) return [];
+
+  const result = await db
+    .update(images)
+    .set({ deletedAt: new Date() })
+    .where(inArray(images.uuid, uuids))
+    .returning();
+
+  return result;
 }
 
 /**

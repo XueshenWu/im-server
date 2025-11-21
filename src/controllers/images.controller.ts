@@ -7,6 +7,8 @@ import {
   getImageByUuid,
   updateImage,
   softDeleteImage,
+  batchSoftDeleteImages,
+  batchSoftDeleteImagesByUuid,
   getImageStats,
   getImagesWithExif,
   createImageWithExif,
@@ -126,6 +128,68 @@ export class ImagesController {
       success: true,
       message: 'Image deleted successfully',
       data: deletedImage,
+    });
+  }
+
+  // Batch soft delete images by IDs
+  async batchDeleteByIds(req: Request, res: Response) {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new AppError('Invalid request. Provide an array of image IDs', 400);
+    }
+
+    // Validate all IDs are numbers
+    const validIds = ids.filter(id => typeof id === 'number' && !isNaN(id));
+
+    if (validIds.length === 0) {
+      throw new AppError('No valid image IDs provided', 400);
+    }
+
+    const deletedImages = await batchSoftDeleteImages(validIds);
+
+    res.json({
+      success: true,
+      message: `Soft deleted ${deletedImages.length} of ${validIds.length} images`,
+      data: {
+        deleted: deletedImages,
+        stats: {
+          requested: validIds.length,
+          successful: deletedImages.length,
+          failed: validIds.length - deletedImages.length,
+        },
+      },
+    });
+  }
+
+  // Batch soft delete images by UUIDs
+  async batchDeleteByUuids(req: Request, res: Response) {
+    const { uuids } = req.body;
+
+    if (!Array.isArray(uuids) || uuids.length === 0) {
+      throw new AppError('Invalid request. Provide an array of image UUIDs', 400);
+    }
+
+    // Validate all UUIDs are strings
+    const validUuids = uuids.filter(uuid => typeof uuid === 'string' && uuid.length > 0);
+
+    if (validUuids.length === 0) {
+      throw new AppError('No valid image UUIDs provided', 400);
+    }
+
+    const deletedImages = await batchSoftDeleteImagesByUuid(validUuids);
+
+    res.json({
+      success: true,
+      message: `Soft deleted ${deletedImages.length} of ${validUuids.length} images`,
+      data: {
+        deleted: deletedImages,
+        stats: {
+          requested: validUuids.length,
+          successful: deletedImages.length,
+          failed: validUuids.length - deletedImages.length,
+        },
+      },
     });
   }
 
