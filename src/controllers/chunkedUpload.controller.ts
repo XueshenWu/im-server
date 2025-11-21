@@ -13,6 +13,7 @@ import {
 import { getImagePaths, IMAGES_DIR } from '../middleware/upload';
 import { createImageWithExif, getImageByHash, getImageByUuid, replaceImageByUuid } from '../db/queries';
 import { redis, getSessionKey, SESSION_TTL, UploadSessionData } from '../config/redis';
+import { logSingleOperation } from '../utils/syncLogger';
 
 const CHUNKS_DIR = './storage/chunks';
 
@@ -316,6 +317,16 @@ export class ChunkedUploadController {
       // Create image record in PostgreSQL with EXIF data
       const newImage = await createImageWithExif(imageData, exifData || undefined);
 
+      // Log the chunked upload operation
+      await logSingleOperation('upload', newImage.id, {
+        filename: newImage.filename,
+        originalName: newImage.originalName,
+        fileSize: newImage.fileSize,
+        format: newImage.format,
+        method: 'chunked_upload',
+        totalChunks: session.totalChunks,
+      });
+
       // Update session status to completed in Redis
       await updateSession(sessionId, {
         status: 'completed',
@@ -586,6 +597,18 @@ export class ChunkedUploadController {
 
       // Replace image in database
       const replacedImage = await replaceImageByUuid(uuid, imageData, exifData || undefined);
+
+      // Log the chunked replace operation
+      await logSingleOperation('update', existingImage.id, {
+        operation: 'replace',
+        uuid: uuid,
+        oldFilename: existingImage.filename,
+        newFilename: replacedImage.filename,
+        oldFileSize: existingImage.fileSize,
+        newFileSize: replacedImage.fileSize,
+        method: 'chunked_replace',
+        totalChunks: session.totalChunks,
+      });
 
       // Delete old files (after successful database update)
       try {

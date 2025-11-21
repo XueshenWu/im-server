@@ -295,6 +295,54 @@ export async function getSyncLogsByStatus(status: string) {
     .orderBy(desc(syncLog.createdAt));
 }
 
+/**
+ * Get sync logs by action group ID
+ */
+export async function getSyncLogsByActionGroupId(actionGroupId: string) {
+  return await db
+    .select()
+    .from(syncLog)
+    .where(eq(syncLog.actionGroupId, actionGroupId))
+    .orderBy(desc(syncLog.createdAt));
+}
+
+/**
+ * Create multiple sync log entries (batch insert)
+ * Used for batch operations where multiple images share the same action_group_id
+ */
+export async function createSyncLogs(logs: NewSyncLog[]) {
+  if (logs.length === 0) return [];
+
+  const result = await db
+    .insert(syncLog)
+    .values(logs)
+    .returning();
+
+  return result;
+}
+
+/**
+ * Update sync log status for multiple logs by action group ID
+ * Used to update all logs in a batch operation at once
+ */
+export async function updateSyncLogStatusByActionGroupId(
+  actionGroupId: string,
+  status: 'pending' | 'in_progress' | 'completed' | 'failed',
+  errorMessage?: string
+) {
+  const result = await db
+    .update(syncLog)
+    .set({
+      status,
+      errorMessage: errorMessage || null,
+      completedAt: status === 'completed' || status === 'failed' ? new Date() : null,
+    })
+    .where(eq(syncLog.actionGroupId, actionGroupId))
+    .returning();
+
+  return result;
+}
+
 // ============================================================
 // UTILITY FUNCTIONS
 // ============================================================

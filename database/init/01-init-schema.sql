@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS sync_log (
     id SERIAL PRIMARY KEY,
     operation VARCHAR(20) NOT NULL CHECK (operation IN ('upload', 'download', 'update', 'delete', 'conflict')),
     image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+    action_group_id UUID,
     status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
     error_message TEXT,
     metadata JSONB,
@@ -72,6 +73,7 @@ CREATE INDEX idx_exif_metadata ON exif_data USING GIN (metadata);
 
 CREATE INDEX idx_sync_log_status ON sync_log(status);
 CREATE INDEX idx_sync_log_created_at ON sync_log(created_at DESC);
+CREATE INDEX idx_sync_log_action_group_id ON sync_log(action_group_id) WHERE action_group_id IS NOT NULL;
 
 -- Function to automatically update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

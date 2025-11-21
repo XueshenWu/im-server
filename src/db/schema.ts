@@ -47,6 +47,7 @@ export const syncLog = pgTable('sync_log', {
   id: serial('id').primaryKey(),
   operation: varchar('operation', { length: 20 }).notNull(), // upload, download, update, delete, conflict
   imageId: integer('image_id').references(() => images.id, { onDelete: 'set null' }),
+  actionGroupId: uuid('action_group_id'), // Groups related operations (e.g., batch uploads)
   status: varchar('status', { length: 20 }).notNull(), // pending, in_progress, completed, failed
   errorMessage: text('error_message'),
   metadata: jsonb('metadata'),

@@ -24,6 +24,7 @@ import {
   getFileExtension,
 } from '../utils/imageProcessor';
 import { getImagePaths } from '../middleware/upload';
+import { logSingleOperation, logBatchOperation } from '../utils/syncLogger';
 
 export class ImagesController {
   // Get all images
@@ -124,6 +125,13 @@ export class ImagesController {
       throw new AppError('Image not found', 404);
     }
 
+    // Log the delete operation
+    await logSingleOperation('delete', deletedImage.id, {
+      filename: deletedImage.filename,
+      originalName: deletedImage.originalName,
+      uuid: deletedImage.uuid,
+    });
+
     res.json({
       success: true,
       message: 'Image deleted successfully',
@@ -147,6 +155,14 @@ export class ImagesController {
     }
 
     const deletedImages = await batchSoftDeleteImages(validIds);
+
+    // Log the batch delete operation
+    const imageIds = deletedImages.map(img => img.id);
+    await logBatchOperation('delete', imageIds, {
+      count: deletedImages.length,
+      requestedCount: validIds.length,
+      method: 'batch_delete_by_ids',
+    });
 
     res.json({
       success: true,
@@ -178,6 +194,14 @@ export class ImagesController {
     }
 
     const deletedImages = await batchSoftDeleteImagesByUuid(validUuids);
+
+    // Log the batch delete operation
+    const imageIds = deletedImages.map(img => img.id);
+    await logBatchOperation('delete', imageIds, {
+      count: deletedImages.length,
+      requestedCount: validUuids.length,
+      method: 'batch_delete_by_uuids',
+    });
 
     res.json({
       success: true,
@@ -262,6 +286,27 @@ export class ImagesController {
         errors.push({
           filename: file.originalname,
           error: error.message || 'Unknown error',
+        });
+      }
+    }
+
+    // Log the upload operation(s)
+    if (uploadedImages.length > 0) {
+      const imageIds = uploadedImages.map(img => img.id);
+      if (imageIds.length === 1) {
+        // Single image upload
+        await logSingleOperation('upload', imageIds[0], {
+          filename: uploadedImages[0].filename,
+          originalName: uploadedImages[0].originalName,
+          fileSize: uploadedImages[0].fileSize,
+          format: uploadedImages[0].format,
+        });
+      } else {
+        // Batch upload
+        await logBatchOperation('upload', imageIds, {
+          count: uploadedImages.length,
+          totalSize: uploadedImages.reduce((sum, img) => sum + img.fileSize, 0),
+          method: 'batch_upload',
         });
       }
     }
@@ -511,6 +556,17 @@ export class ImagesController {
 
       // Replace image in database
       const replacedImage = await replaceImageByUuid(uuid, imageData, exifData || undefined);
+
+      // Log the replace operation
+      await logSingleOperation('update', existingImage.id, {
+        operation: 'replace',
+        uuid: uuid,
+        oldFilename: existingImage.filename,
+        newFilename: replacedImage.filename,
+        oldFileSize: existingImage.fileSize,
+        newFileSize: replacedImage.fileSize,
+        method: 'standard_replace',
+      });
 
       // Delete old files (after successful database update)
       try {
