@@ -2,7 +2,7 @@ import { db } from './index';
 import { images, imageCollections } from './schema';
 import { eq, isNull, and, lt, gt, desc, asc, sql, SQL } from 'drizzle-orm';
 
-export type SortField = 'name' | 'size' | 'type' | 'updatedAt';
+export type SortField = 'name' | 'size' | 'type' | 'updatedAt' | 'createdAt';
 export type SortOrder = 'asc' | 'desc';
 
 export interface PaginationParams {

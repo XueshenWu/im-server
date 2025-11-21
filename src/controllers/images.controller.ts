@@ -297,7 +297,7 @@ export class ImagesController {
     const cursor = req.query.cursor as string | undefined;
     const collectionId = req.query.collectionId ? parseInt(req.query.collectionId as string) : undefined;
     const withExif = req.query.withExif === 'true';
-    const sortBy = req.query.sortBy as 'name' | 'size' | 'type' | 'updatedAt' | undefined;
+    const sortBy = req.query.sortBy as 'name' | 'size' | 'type' | 'updatedAt' | 'createdAt' |undefined;
     const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
 
     if (limit && (isNaN(limit) || limit < 1 || limit > 100)) {
@@ -308,7 +308,7 @@ export class ImagesController {
       throw new AppError('Invalid collection ID', 400);
     }
 
-    if (sortBy && !['name', 'size', 'type', 'updatedAt'].includes(sortBy)) {
+    if (sortBy && !['name', 'size', 'type', 'updatedAt', 'createdAt'].includes(sortBy)) {
       throw new AppError('Invalid sortBy. Must be one of: name, size, type, updatedAt', 400);
     }
 
@@ -338,7 +338,7 @@ export class ImagesController {
     const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string) : 20;
     const collectionId = req.query.collectionId ? parseInt(req.query.collectionId as string) : undefined;
     const withExif = req.query.withExif === 'true';
-    const sortBy = req.query.sortBy as 'name' | 'size' | 'type' | 'updatedAt' | undefined;
+    const sortBy = req.query.sortBy as 'name' | 'size' | 'type' | 'updatedAt' | 'createdAt' | undefined;
     const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
 
     if (page && (isNaN(page) || page < 1)) {
@@ -353,7 +353,7 @@ export class ImagesController {
       throw new AppError('Invalid collection ID', 400);
     }
 
-    if (sortBy && !['name', 'size', 'type', 'updatedAt'].includes(sortBy)) {
+    if (sortBy && !['name', 'size', 'type', 'updatedAt', 'createdAt'].includes(sortBy)) {
       throw new AppError('Invalid sortBy. Must be one of: name, size, type, updatedAt', 400);
     }
 
