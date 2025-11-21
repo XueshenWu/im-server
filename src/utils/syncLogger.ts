@@ -11,11 +11,13 @@ export type StatusType = 'pending' | 'in_progress' | 'completed' | 'failed';
 export async function logSingleOperation(
   operation: OperationType,
   imageId: number | null,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  actionType: string = 'user'
 ) {
   return await createSyncLog({
     operation,
     imageId,
+    actionType,
     status: 'completed',
     metadata: metadata || null,
     completedAt: new Date(),
@@ -29,11 +31,13 @@ export async function logSingleOperation(
 export async function startSingleOperation(
   operation: OperationType,
   imageId: number | null,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  actionType: string = 'user'
 ) {
   const log = await createSyncLog({
     operation,
     imageId,
+    actionType,
     status: 'pending',
     metadata: metadata || null,
   });
@@ -58,7 +62,8 @@ export async function updateOperationStatus(
 export async function logBatchOperation(
   operation: OperationType,
   imageIds: (number | null)[],
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  actionType: string = 'batch'
 ): Promise<{ actionGroupId: string; logs: any[] }> {
   const actionGroupId = randomUUID();
 
@@ -66,6 +71,7 @@ export async function logBatchOperation(
   const logEntries: NewSyncLog[] = imageIds.map(imageId => ({
     operation,
     imageId,
+    actionType,
     actionGroupId,
     status: 'completed' as const,
     metadata: metadata || null,
@@ -84,7 +90,8 @@ export async function logBatchOperation(
 export async function startBatchOperation(
   operation: OperationType,
   imageIds: (number | null)[],
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  actionType: string = 'batch'
 ): Promise<{ actionGroupId: string; logs: any[] }> {
   const actionGroupId = randomUUID();
 
@@ -92,6 +99,7 @@ export async function startBatchOperation(
   const logEntries: NewSyncLog[] = imageIds.map(imageId => ({
     operation,
     imageId,
+    actionType,
     actionGroupId,
     status: 'pending' as const,
     metadata: metadata || null,
@@ -121,9 +129,10 @@ export async function withSingleOperationLogging<T>(
   operation: OperationType,
   imageId: number | null,
   operationFn: () => Promise<T>,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  actionType: string = 'user'
 ): Promise<T> {
-  const logId = await startSingleOperation(operation, imageId, metadata);
+  const logId = await startSingleOperation(operation, imageId, metadata, actionType);
 
   try {
     await updateOperationStatus(logId, 'in_progress');
@@ -143,9 +152,10 @@ export async function withBatchOperationLogging<T>(
   operation: OperationType,
   imageIds: (number | null)[],
   operationFn: (actionGroupId: string) => Promise<T>,
-  metadata?: Record<string, any>
+  metadata?: Record<string, any>,
+  actionType: string = 'batch'
 ): Promise<T> {
-  const { actionGroupId } = await startBatchOperation(operation, imageIds, metadata);
+  const { actionGroupId } = await startBatchOperation(operation, imageIds, metadata, actionType);
 
   try {
     await updateBatchOperationStatus(actionGroupId, 'in_progress');

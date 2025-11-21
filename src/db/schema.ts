@@ -47,12 +47,14 @@ export const syncLog = pgTable('sync_log', {
   id: serial('id').primaryKey(),
   operation: varchar('operation', { length: 20 }).notNull(), // upload, download, update, delete, conflict
   imageId: integer('image_id').references(() => images.id, { onDelete: 'set null' }),
-  actionGroupId: uuid('action_group_id'), // Groups related operations (e.g., batch uploads)
   status: varchar('status', { length: 20 }).notNull(), // pending, in_progress, completed, failed
-  errorMessage: text('error_message'),
+  actionType: varchar('action_type', { length: 20 }).notNull(), // user, system, batch, etc.
   metadata: jsonb('metadata'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   completedAt: timestamp('completed_at', { withTimezone: true }),
+  actionGroupId: uuid('action_group_id'), // Groups related operations (e.g., batch uploads)
+  errorMessage: text('error_message'),
+  userId: integer('user_id'), // Optional user reference for future use
 });
 
 // Collections table

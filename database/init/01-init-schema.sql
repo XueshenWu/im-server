@@ -51,12 +51,14 @@ CREATE TABLE IF NOT EXISTS sync_log (
     id SERIAL PRIMARY KEY,
     operation VARCHAR(20) NOT NULL CHECK (operation IN ('upload', 'download', 'update', 'delete', 'conflict')),
     image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
-    action_group_id UUID,
     status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
-    error_message TEXT,
+    action_type VARCHAR(20) NOT NULL,
     metadata JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    completed_at TIMESTAMP WITH TIME ZONE
+    completed_at TIMESTAMP WITH TIME ZONE,
+    action_group_id UUID,
+    error_message TEXT,
+    user_id INTEGER
 );
 
 -- Create indexes for better performance
