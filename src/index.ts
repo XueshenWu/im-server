@@ -21,7 +21,22 @@ app.use(helmet({
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
   credentials: true,
-  exposedHeaders: ['Content-Length', 'Content-Type'],
+  exposedHeaders: [
+    'Content-Length',
+    'Content-Type',
+    'X-Image-Id',
+    'X-Image-UUID',
+    'X-Image-Filename',
+    'X-Image-Original-Name',
+    'X-Image-Format',
+    'X-Image-File-Size',
+    'X-Image-Width',
+    'X-Image-Height',
+    'X-Image-Hash',
+    'X-Image-Created-At',
+    'X-Image-Updated-At',
+    'X-Image-Is-Corrupted',
+  ],
 }));
 app.use(morgan('dev'));
 app.use(express.json());

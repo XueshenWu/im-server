@@ -310,3 +310,61 @@ export async function createImageWithExif(
     exifData: null,
   };
 }
+
+/**
+ * Replace image by UUID (preserves UUID, ID, createdAt, collections)
+ * Updates file metadata and optionally EXIF data
+ */
+export async function replaceImageByUuid(
+  uuid: string,
+  imageData: Partial<NewImage>,
+  exifDataInput?: Omit<NewExifData, 'imageId'>
+) {
+  // Get existing image
+  const existingImage = await getImageByUuid(uuid);
+  if (!existingImage) {
+    throw new Error('Image not found');
+  }
+
+  // Update image metadata (preserve UUID, ID, createdAt)
+  const updatedImage = await db
+    .update(images)
+    .set({
+      ...imageData,
+      updatedAt: new Date(),
+    })
+    .where(eq(images.uuid, uuid))
+    .returning();
+
+  // Handle EXIF data
+  if (exifDataInput) {
+    const existingExif = await getExifByImageId(existingImage.id);
+
+    if (existingExif) {
+      // Update existing EXIF data
+      const updatedExif = await updateExifData(existingImage.id, exifDataInput);
+      return {
+        ...updatedImage[0],
+        exifData: updatedExif,
+      };
+    } else {
+      // Create new EXIF data
+      const newExif = await createExifData({
+        ...exifDataInput,
+        imageId: existingImage.id,
+      });
+      return {
+        ...updatedImage[0],
+        exifData: newExif,
+      };
+    }
+  } else {
+    // Delete EXIF data if it exists (new image has no EXIF)
+    await deleteExifData(existingImage.id);
+  }
+
+  return {
+    ...updatedImage[0],
+    exifData: null,
+  };
+}

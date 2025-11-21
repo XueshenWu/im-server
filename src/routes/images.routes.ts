@@ -77,6 +77,19 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
  *         schema:
  *           type: boolean
  *         description: Include EXIF data
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [name, size, type, updatedAt]
+ *         description: Field to sort by (name=originalName, size=fileSize, type=format, updatedAt=updatedAt)
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: Sort order (ascending or descending)
  *     responses:
  *       200:
  *         description: Paginated list of images
@@ -143,6 +156,19 @@ router.get('/paginated', asyncHandler(imagesController.getPaginated));
  *         schema:
  *           type: boolean
  *         description: Include EXIF data
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [name, size, type, updatedAt]
+ *         description: Field to sort by (name=originalName, size=fileSize, type=format, updatedAt=updatedAt)
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: Sort order (ascending or descending)
  *     responses:
  *       200:
  *         description: Paginated list of images
@@ -209,6 +235,159 @@ router.get('/stats', asyncHandler(imagesController.getStats));
 
 /**
  * @swagger
+ * /api/images/file/{id}:
+ *   get:
+ *     summary: Get image file by ID with optional metadata
+ *     tags: [Images]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Image ID
+ *       - in: query
+ *         name: info
+ *         schema:
+ *           type: boolean
+ *         description: Include image metadata in response headers (X-Image-*)
+ *     responses:
+ *       200:
+ *         description: Image file
+ *         headers:
+ *           X-Image-Id:
+ *             schema:
+ *               type: integer
+ *             description: Image ID (when info=true)
+ *           X-Image-UUID:
+ *             schema:
+ *               type: string
+ *             description: Image UUID (when info=true)
+ *           X-Image-Filename:
+ *             schema:
+ *               type: string
+ *             description: Image filename (when info=true)
+ *           X-Image-Original-Name:
+ *             schema:
+ *               type: string
+ *             description: Original filename (when info=true)
+ *           X-Image-Format:
+ *             schema:
+ *               type: string
+ *             description: Image format (when info=true)
+ *           X-Image-File-Size:
+ *             schema:
+ *               type: integer
+ *             description: File size in bytes (when info=true)
+ *           X-Image-Width:
+ *             schema:
+ *               type: integer
+ *             description: Image width (when info=true)
+ *           X-Image-Height:
+ *             schema:
+ *               type: integer
+ *             description: Image height (when info=true)
+ *           X-Image-Hash:
+ *             schema:
+ *               type: string
+ *             description: SHA-256 hash (when info=true)
+ *           X-Image-Created-At:
+ *             schema:
+ *               type: string
+ *             description: Creation timestamp (when info=true)
+ *           X-Image-Updated-At:
+ *             schema:
+ *               type: string
+ *             description: Update timestamp (when info=true)
+ *         content:
+ *           image/*:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: Image not found
+ */
+router.get('/file/:id', asyncHandler(imagesController.getFileById));
+
+/**
+ * @swagger
+ * /api/images/file/uuid/{uuid}:
+ *   get:
+ *     summary: Get image file by UUID with optional metadata
+ *     tags: [Images]
+ *     parameters:
+ *       - in: path
+ *         name: uuid
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Image UUID
+ *       - in: query
+ *         name: info
+ *         schema:
+ *           type: boolean
+ *         description: Include image metadata in response headers (X-Image-*)
+ *     responses:
+ *       200:
+ *         description: Image file
+ *         headers:
+ *           X-Image-Id:
+ *             schema:
+ *               type: integer
+ *             description: Image ID (when info=true)
+ *           X-Image-UUID:
+ *             schema:
+ *               type: string
+ *             description: Image UUID (when info=true)
+ *           X-Image-Filename:
+ *             schema:
+ *               type: string
+ *             description: Image filename (when info=true)
+ *           X-Image-Original-Name:
+ *             schema:
+ *               type: string
+ *             description: Original filename (when info=true)
+ *           X-Image-Format:
+ *             schema:
+ *               type: string
+ *             description: Image format (when info=true)
+ *           X-Image-File-Size:
+ *             schema:
+ *               type: integer
+ *             description: File size in bytes (when info=true)
+ *           X-Image-Width:
+ *             schema:
+ *               type: integer
+ *             description: Image width (when info=true)
+ *           X-Image-Height:
+ *             schema:
+ *               type: integer
+ *             description: Image height (when info=true)
+ *           X-Image-Hash:
+ *             schema:
+ *               type: string
+ *             description: SHA-256 hash (when info=true)
+ *           X-Image-Created-At:
+ *             schema:
+ *               type: string
+ *             description: Creation timestamp (when info=true)
+ *           X-Image-Updated-At:
+ *             schema:
+ *               type: string
+ *             description: Update timestamp (when info=true)
+ *         content:
+ *           image/*:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: Image not found
+ */
+router.get('/file/uuid/:uuid', asyncHandler(imagesController.getFileByUuid));
+
+/**
+ * @swagger
  * /api/images/{id}:
  *   get:
  *     summary: Get image by ID
@@ -271,6 +450,165 @@ router.get('/:id', asyncHandler(imagesController.getById));
  *         description: Image not found
  */
 router.get('/uuid/:uuid', asyncHandler(imagesController.getByUuid));
+
+/**
+ * @swagger
+ * /api/images/uuid/{uuid}/replace:
+ *   put:
+ *     summary: Replace image file by UUID
+ *     tags: [Images]
+ *     parameters:
+ *       - in: path
+ *         name: uuid
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Image UUID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Image replaced successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/Image'
+ *       404:
+ *         description: Image not found
+ */
+router.put('/uuid/:uuid/replace', upload.single('image'), asyncHandler(imagesController.replaceImage));
+
+/**
+ * @swagger
+ * /api/images/uuid/{uuid}/replace/chunked/init:
+ *   post:
+ *     summary: Initialize chunked image replacement session
+ *     tags: [Image Replacement]
+ *     parameters:
+ *       - in: path
+ *         name: uuid
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Image UUID to replace
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - filename
+ *               - totalSize
+ *               - chunkSize
+ *               - totalChunks
+ *             properties:
+ *               filename:
+ *                 type: string
+ *                 description: Original filename
+ *               totalSize:
+ *                 type: integer
+ *                 description: Total file size in bytes
+ *               chunkSize:
+ *                 type: integer
+ *                 description: Size of each chunk in bytes
+ *               totalChunks:
+ *                 type: integer
+ *                 description: Total number of chunks
+ *               mimeType:
+ *                 type: string
+ *                 description: MIME type of the file
+ *     responses:
+ *       201:
+ *         description: Replacement session created
+ *       404:
+ *         description: Image not found
+ */
+router.post('/uuid/:uuid/replace/chunked/init', asyncHandler(chunkedUploadController.initReplaceUpload));
+
+/**
+ * @swagger
+ * /api/images/uuid/{uuid}/replace/chunked/upload/{sessionId}:
+ *   post:
+ *     summary: Upload chunk for image replacement
+ *     tags: [Image Replacement]
+ *     parameters:
+ *       - in: path
+ *         name: uuid
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - chunk
+ *               - chunkNumber
+ *             properties:
+ *               chunk:
+ *                 type: string
+ *                 format: binary
+ *               chunkNumber:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Chunk uploaded successfully
+ */
+router.post('/uuid/:uuid/replace/chunked/upload/:sessionId', chunkUpload.single('chunk'), asyncHandler(chunkedUploadController.uploadChunk));
+
+/**
+ * @swagger
+ * /api/images/uuid/{uuid}/replace/chunked/complete/{sessionId}:
+ *   post:
+ *     summary: Complete chunked image replacement
+ *     tags: [Image Replacement]
+ *     parameters:
+ *       - in: path
+ *         name: uuid
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Image replaced successfully
+ *       404:
+ *         description: Image or session not found
+ */
+router.post('/uuid/:uuid/replace/chunked/complete/:sessionId', asyncHandler(chunkedUploadController.completeReplaceUpload));
 
 /**
  * @swagger

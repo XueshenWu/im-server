@@ -1,11 +1,16 @@
 import { db } from './index';
 import { images, imageCollections } from './schema';
-import { eq, isNull, and, lt, desc, sql } from 'drizzle-orm';
+import { eq, isNull, and, lt, gt, desc, asc, sql, SQL } from 'drizzle-orm';
+
+export type SortField = 'name' | 'size' | 'type' | 'updatedAt';
+export type SortOrder = 'asc' | 'desc';
 
 export interface PaginationParams {
   limit?: number;
   cursor?: string; // Base64 encoded cursor (image ID)
   collectionId?: number;
+  sortBy?: SortField;
+  sortOrder?: SortOrder;
 }
 
 export interface PaginatedResult<T> {
@@ -18,6 +23,8 @@ export interface PagePaginationParams {
   page?: number;
   pageSize?: number;
   collectionId?: number;
+  sortBy?: SortField;
+  sortOrder?: SortOrder;
 }
 
 export interface PagePaginatedResult<T> {
@@ -33,12 +40,40 @@ export interface PagePaginatedResult<T> {
 }
 
 /**
+ * Helper function to get the sort column based on sortBy parameter
+ */
+function getSortColumn(sortBy?: SortField) {
+  switch (sortBy) {
+    case 'name':
+      return images.originalName;
+    case 'size':
+      return images.fileSize;
+    case 'type':
+      return images.format;
+    case 'updatedAt':
+      return images.updatedAt;
+    default:
+      return images.id;
+  }
+}
+
+/**
+ * Helper function to get the order function (asc or desc)
+ */
+function getOrderFunction(sortOrder?: SortOrder) {
+  return sortOrder === 'asc' ? asc : desc;
+}
+
+/**
  * Get paginated images with cursor-based pagination
- * Supports filtering by collection
+ * Supports filtering by collection and sorting
  */
 export async function getPaginatedImages(params: PaginationParams): Promise<PaginatedResult<any>> {
   const limit = Math.min(params.limit || 20, 100); // Max 100 items per page
   const cursor = params.cursor ? parseInt(Buffer.from(params.cursor, 'base64').toString('utf-8')) : null;
+
+  const sortColumn = getSortColumn(params.sortBy);
+  const orderFn = getOrderFunction(params.sortOrder);
 
   let query;
 
@@ -75,7 +110,7 @@ export async function getPaginatedImages(params: PaginationParams): Promise<Pagi
       .from(imageCollections)
       .innerJoin(images, eq(imageCollections.imageId, images.id))
       .where(and(...conditions))
-      .orderBy(desc(images.id))
+      .orderBy(orderFn(sortColumn))
       .limit(limit + 1); // Fetch one extra to check if there are more
   } else {
     // Get all images
@@ -105,7 +140,7 @@ export async function getPaginatedImages(params: PaginationParams): Promise<Pagi
       })
       .from(images)
       .where(and(...conditions))
-      .orderBy(desc(images.id))
+      .orderBy(orderFn(sortColumn))
       .limit(limit + 1);
   }
 
@@ -134,6 +169,9 @@ export async function getPaginatedImagesWithExif(params: PaginationParams): Prom
   const limit = Math.min(params.limit || 20, 100);
   const cursor = params.cursor ? parseInt(Buffer.from(params.cursor, 'base64').toString('utf-8')) : null;
 
+  const sortColumn = getSortColumn(params.sortBy);
+  const orderFn = getOrderFunction(params.sortOrder);
+
   const conditions = [isNull(images.deletedAt)];
 
   if (cursor) {
@@ -152,7 +190,7 @@ export async function getPaginatedImagesWithExif(params: PaginationParams): Prom
 
   const results = await db.query.images.findMany({
     where: and(...conditions),
-    orderBy: [desc(images.id)],
+    orderBy: [orderFn(sortColumn)],
     limit: limit + 1,
     with: {
       exifData: true,
@@ -175,12 +213,15 @@ export async function getPaginatedImagesWithExif(params: PaginationParams): Prom
 
 /**
  * Get paginated images with page-based pagination
- * Supports filtering by collection
+ * Supports filtering by collection and sorting
  */
 export async function getPagePaginatedImages(params: PagePaginationParams): Promise<PagePaginatedResult<any>> {
   const page = Math.max(params.page || 1, 1); // Ensure page >= 1
   const pageSize = Math.min(Math.max(params.pageSize || 20, 1), 100); // Between 1-100
   const offset = (page - 1) * pageSize;
+
+  const sortColumn = getSortColumn(params.sortBy);
+  const orderFn = getOrderFunction(params.sortOrder);
 
   let dataQuery;
   let countQuery;
@@ -214,7 +255,7 @@ export async function getPagePaginatedImages(params: PagePaginationParams): Prom
       .from(imageCollections)
       .innerJoin(images, eq(imageCollections.imageId, images.id))
       .where(and(...conditions))
-      .orderBy(desc(images.id))
+      .orderBy(orderFn(sortColumn))
       .limit(pageSize)
       .offset(offset);
 
@@ -248,7 +289,7 @@ export async function getPagePaginatedImages(params: PagePaginationParams): Prom
       })
       .from(images)
       .where(and(...conditions))
-      .orderBy(desc(images.id))
+      .orderBy(orderFn(sortColumn))
       .limit(pageSize)
       .offset(offset);
 
@@ -288,6 +329,9 @@ export async function getPagePaginatedImagesWithExif(params: PagePaginationParam
   const pageSize = Math.min(Math.max(params.pageSize || 20, 1), 100);
   const offset = (page - 1) * pageSize;
 
+  const sortColumn = getSortColumn(params.sortBy);
+  const orderFn = getOrderFunction(params.sortOrder);
+
   const conditions = [isNull(images.deletedAt)];
 
   if (params.collectionId) {
@@ -302,7 +346,7 @@ export async function getPagePaginatedImagesWithExif(params: PagePaginationParam
   // Get data
   const data = await db.query.images.findMany({
     where: and(...conditions),
-    orderBy: [desc(images.id)],
+    orderBy: [orderFn(sortColumn)],
     limit: pageSize,
     offset: offset,
     with: {

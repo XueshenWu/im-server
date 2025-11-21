@@ -11,7 +11,7 @@ import {
   getFileExtension,
 } from '../utils/imageProcessor';
 import { getImagePaths, IMAGES_DIR } from '../middleware/upload';
-import { createImageWithExif, getImageByHash } from '../db/queries';
+import { createImageWithExif, getImageByHash, getImageByUuid, replaceImageByUuid } from '../db/queries';
 import { redis, getSessionKey, SESSION_TTL, UploadSessionData } from '../config/redis';
 
 const CHUNKS_DIR = './storage/chunks';
@@ -407,6 +407,230 @@ export class ChunkedUploadController {
       success: true,
       message: 'Upload session cancelled and cleaned up',
     });
+  }
+
+  /**
+   * Initialize a chunked image replacement session
+   * POST /api/images/uuid/:uuid/replace/chunked/init
+   */
+  async initReplaceUpload(req: Request, res: Response) {
+    const { uuid } = req.params;
+    const { filename, totalSize, chunkSize, totalChunks, mimeType } = req.body;
+
+    // Check if image exists
+    const existingImage = await getImageByUuid(uuid);
+    if (!existingImage) {
+      throw new AppError('Image not found', 404);
+    }
+
+    // Validate required fields
+    if (!filename || !totalSize || !chunkSize || !totalChunks) {
+      throw new AppError('Missing required fields: filename, totalSize, chunkSize, totalChunks', 400);
+    }
+
+    // Validate file type
+    const ext = path.extname(filename).toLowerCase();
+    const ALLOWED_FORMATS = ['.jpg', '.jpeg', '.png', '.tif', '.tiff'];
+    if (!ALLOWED_FORMATS.includes(ext)) {
+      throw new AppError(`Invalid file format. Allowed formats: ${ALLOWED_FORMATS.join(', ')}`, 400);
+    }
+
+    // Validate total size (max 200MB for chunked uploads)
+    const MAX_SIZE = 200 * 1024 * 1024;
+    if (totalSize > MAX_SIZE) {
+      throw new AppError('File size exceeds maximum allowed size (200MB)', 400);
+    }
+
+    // Calculate expected number of chunks
+    const expectedChunks = Math.ceil(totalSize / chunkSize);
+    if (totalChunks !== expectedChunks) {
+      throw new AppError('Total chunks does not match calculated chunks', 400);
+    }
+
+    // Generate unique session ID and filename
+    const sessionId = crypto.randomUUID();
+    const uniqueFilename = generateUniqueFilename(filename);
+
+    // Create session data with replacement metadata
+    const sessionData: UploadSessionData & { replaceUuid?: string } = {
+      sessionId,
+      originalName: filename,
+      filename: uniqueFilename,
+      totalChunks,
+      totalSize,
+      chunkSize,
+      mimeType: mimeType || 'application/octet-stream',
+      status: 'pending',
+      uploadedChunks: [],
+      createdAt: new Date().toISOString(),
+      replaceUuid: uuid, // Store UUID for replacement
+    };
+
+    // Save to Redis with 24-hour TTL
+    await saveSession(sessionData);
+
+    // Ensure chunks directory exists
+    await ensureChunksDirectory();
+
+    // Create session directory
+    const sessionDir = getSessionDir(sessionId);
+    await fs.mkdir(sessionDir, { recursive: true });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        sessionId: sessionData.sessionId,
+        filename: sessionData.filename,
+        totalChunks: sessionData.totalChunks,
+        chunkSize: sessionData.chunkSize,
+        expiresIn: SESSION_TTL,
+        replaceUuid: uuid,
+      },
+    });
+  }
+
+  /**
+   * Complete chunked image replacement and assemble file
+   * POST /api/images/uuid/:uuid/replace/chunked/complete/:sessionId
+   */
+  async completeReplaceUpload(req: Request, res: Response) {
+    const { uuid, sessionId } = req.params;
+
+    // Get session from Redis
+    const session = await getSession(sessionId) as UploadSessionData & { replaceUuid?: string };
+
+    if (!session) {
+      throw new AppError('Upload session not found or expired', 404);
+    }
+
+    // Verify session is for this UUID
+    if (session.replaceUuid !== uuid) {
+      throw new AppError('Session does not match image UUID', 400);
+    }
+
+    // Check if image exists
+    const existingImage = await getImageByUuid(uuid);
+    if (!existingImage) {
+      throw new AppError('Image not found', 404);
+    }
+
+    // Check if all chunks uploaded
+    if (session.uploadedChunks.length !== session.totalChunks) {
+      throw new AppError(
+        `Upload incomplete. ${session.uploadedChunks.length} of ${session.totalChunks} chunks uploaded`,
+        400
+      );
+    }
+
+    try {
+      // Assemble chunks into final file
+      const finalPath = path.join(IMAGES_DIR, session.filename);
+      const writeStream = await fs.open(finalPath, 'w');
+
+      try {
+        // Write chunks in order
+        for (let i = 0; i < session.totalChunks; i++) {
+          const chunkPath = getChunkPath(sessionId, i);
+          const chunkData = await fs.readFile(chunkPath);
+          await writeStream.write(chunkData);
+        }
+      } finally {
+        await writeStream.close();
+      }
+
+      // Verify file size
+      const stats = await fs.stat(finalPath);
+      if (stats.size !== session.totalSize) {
+        await fs.unlink(finalPath);
+        throw new AppError('File size mismatch after assembly', 500);
+      }
+
+      // Get file paths
+      const { imagePath, thumbnailPath, relativeImagePath, relativeThumbnailPath } =
+        getImagePaths(session.filename);
+
+      // Process image and get metadata
+      const imageMetadata = await processImage(imagePath);
+
+      // Generate thumbnail if image is not corrupted
+      let finalThumbnailPath = null;
+      if (!imageMetadata.isCorrupted) {
+        try {
+          await generateThumbnail(imagePath, thumbnailPath);
+          finalThumbnailPath = relativeThumbnailPath;
+        } catch (error) {
+          console.error('Error generating thumbnail:', error);
+        }
+      }
+
+      // Extract EXIF data
+      let exifData = null;
+      if (!imageMetadata.isCorrupted) {
+        exifData = await extractExifData(imagePath);
+      }
+
+      // Prepare image data for replacement
+      const imageData = {
+        filename: session.filename,
+        originalName: session.originalName,
+        filePath: relativeImagePath,
+        thumbnailPath: finalThumbnailPath,
+        fileSize: imageMetadata.size,
+        format: getFileExtension(session.originalName),
+        width: imageMetadata.width || null,
+        height: imageMetadata.height || null,
+        hash: imageMetadata.hash,
+        mimeType: session.mimeType || 'application/octet-stream',
+        isCorrupted: imageMetadata.isCorrupted,
+      };
+
+      // Replace image in database
+      const replacedImage = await replaceImageByUuid(uuid, imageData, exifData || undefined);
+
+      // Delete old files (after successful database update)
+      try {
+        const oldImagePath = path.join(process.cwd(), 'storage', 'images', path.basename(existingImage.filePath));
+        await fs.unlink(oldImagePath).catch(() => {
+          console.warn(`Could not delete old image file: ${oldImagePath}`);
+        });
+
+        if (existingImage.thumbnailPath) {
+          const oldThumbnailPath = path.join(process.cwd(), 'storage', 'thumbnails', path.basename(existingImage.thumbnailPath));
+          await fs.unlink(oldThumbnailPath).catch(() => {
+            console.warn(`Could not delete old thumbnail file: ${oldThumbnailPath}`);
+          });
+        }
+      } catch (error) {
+        console.error('Error deleting old files:', error);
+      }
+
+      // Update session status to completed in Redis
+      await updateSession(sessionId, {
+        status: 'completed',
+      });
+
+      // Clean up chunks directory
+      const sessionDir = getSessionDir(sessionId);
+      await fs.rm(sessionDir, { recursive: true, force: true });
+
+      // Delete session from Redis after successful completion
+      await deleteSession(sessionId);
+
+      res.status(200).json({
+        success: true,
+        message: 'Image replaced successfully',
+        data: replacedImage,
+      });
+    } catch (error: any) {
+      // Mark session as failed in Redis
+      try {
+        await updateSession(sessionId, { status: 'failed' });
+      } catch (updateError) {
+        console.error('Failed to update session status:', updateError);
+      }
+
+      throw error;
+    }
   }
 }
 
