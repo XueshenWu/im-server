@@ -8,7 +8,7 @@ import { errorHandler } from './middleware/errorHandler';
 import imagesRoutes from './routes/images.routes';
 import healthRoutes from './routes/health.routes';
 import collectionsRoutes from './routes/collections.routes';
-import logger from './config/logger';
+import logger, { morganStream } from './config/logger';
 import 'dotenv/config';
 
 const app: Application = express();
@@ -39,7 +39,7 @@ app.use(cors({
     'X-Image-Is-Corrupted',
   ],
 }));
-app.use(morgan('dev'));
+app.use(morgan(':method :url :status :res[content-length] - :response-time ms', { stream: morganStream }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

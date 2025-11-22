@@ -66,4 +66,12 @@ const logger = winston.createLogger({
   exitOnError: false,
 });
 
+// Create a stream object for Morgan to use
+export const morganStream = {
+  write: (message: string) => {
+    // Remove trailing newline that Morgan adds
+    logger.info(message.trim());
+  },
+};
+
 export default logger;
