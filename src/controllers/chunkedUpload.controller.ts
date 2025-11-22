@@ -13,6 +13,7 @@ import {
 import { getImagePaths, IMAGES_DIR } from '../middleware/upload';
 import { createImageWithExif, getImageByHash, getImageByUuid, replaceImageByUuid } from '../db/queries';
 import { redis, getSessionKey, SESSION_TTL, UploadSessionData } from '../config/redis';
+import logger from '../config/logger';
 
 const CHUNKS_DIR = './storage/chunks';
 
@@ -288,7 +289,7 @@ export class ChunkedUploadController {
           await generateThumbnail(imagePath, thumbnailPath);
           finalThumbnailPath = relativeThumbnailPath;
         } catch (error) {
-          console.error('Error generating thumbnail:', error);
+          logger.error('Error generating thumbnail:', error);
         }
       }
 
@@ -338,7 +339,7 @@ export class ChunkedUploadController {
       try {
         await updateSession(sessionId, { status: 'failed' });
       } catch (updateError) {
-        console.error('Failed to update session status:', updateError);
+        logger.error('Failed to update session status:', updateError);
       }
 
       throw error;
@@ -397,7 +398,7 @@ export class ChunkedUploadController {
     try {
       await fs.rm(sessionDir, { recursive: true, force: true });
     } catch (error) {
-      console.error(`Failed to delete chunks directory:`, error);
+      logger.error(`Failed to delete chunks directory:`, error);
     }
 
     // Delete session from Redis
@@ -559,7 +560,7 @@ export class ChunkedUploadController {
           await generateThumbnail(imagePath, thumbnailPath);
           finalThumbnailPath = relativeThumbnailPath;
         } catch (error) {
-          console.error('Error generating thumbnail:', error);
+          logger.error('Error generating thumbnail:', error);
         }
       }
 
@@ -591,17 +592,17 @@ export class ChunkedUploadController {
       try {
         const oldImagePath = path.join(process.cwd(), 'storage', 'images', path.basename(existingImage.filePath));
         await fs.unlink(oldImagePath).catch(() => {
-          console.warn(`Could not delete old image file: ${oldImagePath}`);
+          logger.warn(`Could not delete old image file: ${oldImagePath}`);
         });
 
         if (existingImage.thumbnailPath) {
           const oldThumbnailPath = path.join(process.cwd(), 'storage', 'thumbnails', path.basename(existingImage.thumbnailPath));
           await fs.unlink(oldThumbnailPath).catch(() => {
-            console.warn(`Could not delete old thumbnail file: ${oldThumbnailPath}`);
+            logger.warn(`Could not delete old thumbnail file: ${oldThumbnailPath}`);
           });
         }
       } catch (error) {
-        console.error('Error deleting old files:', error);
+        logger.error('Error deleting old files:', error);
       }
 
       // Update session status to completed in Redis
@@ -626,7 +627,7 @@ export class ChunkedUploadController {
       try {
         await updateSession(sessionId, { status: 'failed' });
       } catch (updateError) {
-        console.error('Failed to update session status:', updateError);
+        logger.error('Failed to update session status:', updateError);
       }
 
       throw error;

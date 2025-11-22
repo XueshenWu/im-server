@@ -24,6 +24,7 @@ import {
   getFileExtension,
 } from '../utils/imageProcessor';
 import { getImagePaths } from '../middleware/upload';
+import logger from '../config/logger';
 
 export class ImagesController {
   // Get all images
@@ -230,7 +231,7 @@ export class ImagesController {
             await generateThumbnail(imagePath, thumbnailPath);
             finalThumbnailPath = relativeThumbnailPath;
           } catch (error) {
-            console.error('Error generating thumbnail:', error);
+            logger.error('Error generating thumbnail:', error);
           }
         }
 
@@ -484,7 +485,7 @@ export class ImagesController {
           await generateThumbnail(imagePath, thumbnailPath);
           finalThumbnailPath = relativeThumbnailPath;
         } catch (error) {
-          console.error('Error generating thumbnail:', error);
+          logger.error('Error generating thumbnail:', error);
         }
       }
 
@@ -516,17 +517,17 @@ export class ImagesController {
       try {
         const oldImagePath = path.join(process.cwd(), 'storage', 'images', path.basename(existingImage.filePath));
         await fs.unlink(oldImagePath).catch(() => {
-          console.warn(`Could not delete old image file: ${oldImagePath}`);
+          logger.warn(`Could not delete old image file: ${oldImagePath}`);
         });
 
         if (existingImage.thumbnailPath) {
           const oldThumbnailPath = path.join(process.cwd(), 'storage', 'thumbnails', path.basename(existingImage.thumbnailPath));
           await fs.unlink(oldThumbnailPath).catch(() => {
-            console.warn(`Could not delete old thumbnail file: ${oldThumbnailPath}`);
+            logger.warn(`Could not delete old thumbnail file: ${oldThumbnailPath}`);
           });
         }
       } catch (error) {
-        console.error('Error deleting old files:', error);
+        logger.error('Error deleting old files:', error);
         // Don't fail the request if file deletion fails
       }
 

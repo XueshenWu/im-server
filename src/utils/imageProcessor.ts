@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 import exifr from 'exifr';
+import logger from '../config/logger';
 
 export interface ImageMetadata {
   width: number;
@@ -171,7 +172,7 @@ export async function extractExifData(filePath: string): Promise<ExifMetadata | 
       },
     };
   } catch (error) {
-    console.error('Error extracting EXIF data:', error);
+    logger.error('Error extracting EXIF data:', error);
     return null;
   }
 }

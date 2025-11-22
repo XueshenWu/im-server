@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler';
 import imagesRoutes from './routes/images.routes';
 import healthRoutes from './routes/health.routes';
 import collectionsRoutes from './routes/collections.routes';
+import logger from './config/logger';
 import 'dotenv/config';
 
 const app: Application = express();
@@ -81,9 +82,9 @@ app.use(errorHandler);
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
-  console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
-  console.log(`❤️  Health Check: http://localhost:${PORT}/api/health\n`);
+  logger.info(`Server is running on http://localhost:${PORT}`);
+  logger.info(`API Documentation: http://localhost:${PORT}/api-docs`);
+  logger.info(`Health Check: http://localhost:${PORT}/api/health`);
 });
 
 export default app;
