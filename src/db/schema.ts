@@ -45,8 +45,11 @@ export const exifData = pgTable('exif_data', {
 // Sync log table
 export const syncLog = pgTable('sync_log', {
   id: serial('id').primaryKey(),
-  operation: varchar('operation', { length: 20 }).notNull(), // upload, download, update, delete, conflict
+  syncSequence: bigint('sync_sequence', { mode: 'number' }).notNull().unique(),
+  operation: varchar('operation', { length: 20 }).notNull(), // upload, download, update, delete, conflict, batch_upload, batch_delete, batch_update, replace
   imageId: integer('image_id').references(() => images.id, { onDelete: 'set null' }),
+  clientId: varchar('client_id', { length: 100 }),
+  groupOperationId: integer('group_operation_id').references((): any => syncLog.id, { onDelete: 'cascade' }),
   status: varchar('status', { length: 20 }).notNull(), // pending, in_progress, completed, failed
   errorMessage: text('error_message'),
   metadata: jsonb('metadata'),
@@ -91,10 +94,18 @@ export const exifDataRelations = relations(exifData, ({ one }) => ({
   }),
 }));
 
-export const syncLogRelations = relations(syncLog, ({ one }) => ({
+export const syncLogRelations = relations(syncLog, ({ one, many }) => ({
   image: one(images, {
     fields: [syncLog.imageId],
     references: [images.id],
+  }),
+  parentOperation: one(syncLog, {
+    fields: [syncLog.groupOperationId],
+    references: [syncLog.id],
+    relationName: 'group_operations',
+  }),
+  childOperations: many(syncLog, {
+    relationName: 'group_operations',
   }),
 }));
 

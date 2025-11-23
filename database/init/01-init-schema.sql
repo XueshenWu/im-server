@@ -49,8 +49,11 @@ CREATE TABLE IF NOT EXISTS exif_data (
 -- Sync log table (for tracking sync operations)
 CREATE TABLE IF NOT EXISTS sync_log (
     id SERIAL PRIMARY KEY,
-    operation VARCHAR(20) NOT NULL CHECK (operation IN ('upload', 'download', 'update', 'delete', 'conflict')),
+    sync_sequence BIGSERIAL UNIQUE NOT NULL,
+    operation VARCHAR(20) NOT NULL CHECK (operation IN ('upload', 'download', 'update', 'delete', 'conflict', 'batch_upload', 'batch_delete', 'batch_update', 'replace')),
     image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+    client_id VARCHAR(100),
+    group_operation_id INTEGER REFERENCES sync_log(id) ON DELETE CASCADE,
     status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
     error_message TEXT,
     metadata JSONB,
@@ -72,6 +75,9 @@ CREATE INDEX idx_exif_metadata ON exif_data USING GIN (metadata);
 
 CREATE INDEX idx_sync_log_status ON sync_log(status);
 CREATE INDEX idx_sync_log_created_at ON sync_log(created_at DESC);
+CREATE INDEX idx_sync_log_sync_sequence ON sync_log(sync_sequence DESC);
+CREATE INDEX idx_sync_log_client_id ON sync_log(client_id);
+CREATE INDEX idx_sync_log_group_operation_id ON sync_log(group_operation_id) WHERE group_operation_id IS NOT NULL;
 
 -- Function to automatically update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -97,3 +103,6 @@ COMMENT ON TABLE sync_log IS 'Tracks synchronization operations between client a
 COMMENT ON COLUMN images.hash IS 'SHA-256 hash for detecting file changes and duplicates';
 COMMENT ON COLUMN images.is_corrupted IS 'Flag indicating if image failed validation during upload';
 COMMENT ON COLUMN exif_data.metadata IS 'Additional EXIF data in JSON format';
+COMMENT ON COLUMN sync_log.sync_sequence IS 'Global sequence number for ordering all operations (like Git commits)';
+COMMENT ON COLUMN sync_log.client_id IS 'Identifier of the client/device that performed the operation';
+COMMENT ON COLUMN sync_log.group_operation_id IS 'References parent sync_log.id for batch operations';

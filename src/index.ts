@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler';
 import imagesRoutes from './routes/images.routes';
 import healthRoutes from './routes/health.routes';
 import collectionsRoutes from './routes/collections.routes';
+import syncRoutes from './routes/sync.routes';
 import logger, { morganStream } from './config/logger';
 import 'dotenv/config';
 
@@ -37,6 +38,9 @@ app.use(cors({
     'X-Image-Created-At',
     'X-Image-Updated-At',
     'X-Image-Is-Corrupted',
+    'X-Current-Sequence',
+    'X-Client-Sequence',
+    'X-Operations-Behind',
   ],
 }));
 app.use(morgan(':method :url :status :res[content-length] - :response-time ms', { stream: morganStream }));
@@ -60,6 +64,7 @@ app.use('/storage', (_req, res, next) => {
 
 // Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/sync', syncRoutes);
 app.use('/api/images', imagesRoutes);
 app.use('/api/collections', collectionsRoutes);
 
