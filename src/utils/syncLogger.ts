@@ -3,6 +3,9 @@ import { syncLog } from '../db/schema';
 import { eq, desc, gt, and } from 'drizzle-orm';
 import logger from '../config/logger';
 
+// Feature flag to enable/disable sync logging
+const SYNC_ENABLED = process.env.SYNC_ENABLED !== 'false'; // Default to true
+
 /**
  * Operation types for sync logging
  */
@@ -56,13 +59,20 @@ export interface SyncLogMetadata {
  * Get the current maximum sync sequence number
  */
 export async function getCurrentSyncSequence(): Promise<number> {
-  const result = await db
-    .select({ syncSequence: syncLog.syncSequence })
-    .from(syncLog)
-    .orderBy(desc(syncLog.syncSequence))
-    .limit(1);
+  if (!SYNC_ENABLED) return 0;
 
-  return result[0]?.syncSequence || 0;
+  try {
+    const result = await db
+      .select({ syncSequence: syncLog.syncSequence })
+      .from(syncLog)
+      .orderBy(desc(syncLog.syncSequence))
+      .limit(1);
+
+    return result[0]?.syncSequence || 0;
+  } catch (error) {
+    logger.warn('Sync system not available (migration may not be applied). Set SYNC_ENABLED=false to disable sync logging.');
+    return 0;
+  }
 }
 
 /**
@@ -76,6 +86,11 @@ export async function createSyncLogEntry(params: {
   status?: SyncStatus;
   metadata?: SyncLogMetadata;
 }): Promise<{ id: number; syncSequence: number }> {
+  // Return dummy value if sync is disabled
+  if (!SYNC_ENABLED) {
+    return { id: 0, syncSequence: 0 };
+  }
+
   const {
     operation,
     imageId = null,
@@ -118,6 +133,8 @@ export async function updateSyncLogStatus(
   status: SyncStatus,
   errorMessage?: string
 ): Promise<void> {
+  if (!SYNC_ENABLED) return;
+
   try {
     await db
       .update(syncLog)
@@ -142,6 +159,8 @@ export async function getSyncOperationsSince(
   sinceSequence: number,
   limit: number = 100
 ): Promise<any[]> {
+  if (!SYNC_ENABLED) return [];
+
   return await db
     .select()
     .from(syncLog)
@@ -157,6 +176,8 @@ export async function getSyncOperationsByClient(
   clientId: string,
   limit: number = 100
 ): Promise<any[]> {
+  if (!SYNC_ENABLED) return [];
+
   return await db
     .select()
     .from(syncLog)
