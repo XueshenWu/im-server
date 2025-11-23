@@ -14,6 +14,8 @@ import { getImagePaths, IMAGES_DIR } from '../middleware/upload';
 import { createImageWithExif, getImageByHash, getImageByUuid, replaceImageByUuid } from '../db/queries';
 import { redis, getSessionKey, SESSION_TTL, UploadSessionData } from '../config/redis';
 import logger from '../config/logger';
+import { logSuccessfulOperation } from '../utils/syncLogger';
+import { getClientId } from '../middleware/syncValidation';
 
 const CHUNKS_DIR = './storage/chunks';
 
@@ -317,6 +319,21 @@ export class ChunkedUploadController {
       // Create image record in PostgreSQL with EXIF data
       const newImage = await createImageWithExif(imageData, exifData || undefined);
 
+      // Log successful chunked upload to sync log
+      const clientId = getClientId(req);
+      await logSuccessfulOperation({
+        operation: 'upload',
+        imageId: newImage.id,
+        clientId,
+        metadata: {
+          original_filename: session.originalName,
+          file_size: imageMetadata.size,
+          file_hash: imageMetadata.hash,
+          upload_type: 'chunked',
+          chunks_count: session.totalChunks,
+        },
+      });
+
       // Update session status to completed in Redis
       await updateSession(sessionId, {
         status: 'completed',
@@ -604,6 +621,22 @@ export class ChunkedUploadController {
       } catch (error) {
         logger.error('Error deleting old files:', error);
       }
+
+      // Log successful chunked replacement to sync log
+      const clientId = getClientId(req);
+      await logSuccessfulOperation({
+        operation: 'replace',
+        imageId: existingImage.id,
+        clientId,
+        metadata: {
+          old_filename: existingImage.filename,
+          new_filename: session.filename,
+          new_file_size: imageMetadata.size,
+          new_file_hash: imageMetadata.hash,
+          upload_type: 'chunked',
+          chunks_count: session.totalChunks,
+        },
+      });
 
       // Update session status to completed in Redis
       await updateSession(sessionId, {

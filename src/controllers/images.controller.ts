@@ -25,6 +25,13 @@ import {
 } from '../utils/imageProcessor';
 import { getImagePaths } from '../middleware/upload';
 import logger from '../config/logger';
+import {
+  createBatchOperation,
+  updateBatchOperationSummary,
+  logSuccessfulOperation,
+  logFailedOperation,
+} from '../utils/syncLogger';
+import { getClientId } from '../middleware/syncValidation';
 
 export class ImagesController {
   // Get all images
@@ -105,6 +112,18 @@ export class ImagesController {
       throw new AppError('Image not found', 404);
     }
 
+    // Log update to sync log
+    const clientId = getClientId(req);
+    await logSuccessfulOperation({
+      operation: 'update',
+      imageId: id,
+      clientId,
+      metadata: {
+        updated_fields: Object.keys(req.body),
+        filename: updatedImage.filename,
+      },
+    });
+
     res.json({
       success: true,
       data: updatedImage,
@@ -124,6 +143,18 @@ export class ImagesController {
     if (!deletedImage) {
       throw new AppError('Image not found', 404);
     }
+
+    // Log deletion to sync log
+    const clientId = getClientId(req);
+    await logSuccessfulOperation({
+      operation: 'delete',
+      imageId: id,
+      clientId,
+      metadata: {
+        filename: deletedImage.filename,
+        original_name: deletedImage.originalName,
+      },
+    });
 
     res.json({
       success: true,
@@ -147,7 +178,56 @@ export class ImagesController {
       throw new AppError('No valid image IDs provided', 400);
     }
 
+    const clientId = getClientId(req);
+
+    // Create batch operation parent
+    const batchOperation = await createBatchOperation({
+      operation: 'batch_delete',
+      clientId,
+      totalCount: validIds.length,
+      metadata: {
+        request_source: 'api',
+        delete_by: 'ids',
+      },
+    });
+
     const deletedImages = await batchSoftDeleteImages(validIds);
+
+    // Log each successful deletion
+    for (const deletedImage of deletedImages) {
+      await logSuccessfulOperation({
+        operation: 'delete',
+        imageId: deletedImage.id,
+        clientId,
+        groupOperationId: batchOperation.id,
+        metadata: {
+          filename: deletedImage.filename,
+          original_name: deletedImage.originalName,
+        },
+      });
+    }
+
+    // Log failed deletions
+    const failedCount = validIds.length - deletedImages.length;
+    const deletedIds = new Set(deletedImages.map(img => img.id));
+    for (const id of validIds) {
+      if (!deletedIds.has(id)) {
+        await logFailedOperation({
+          operation: 'delete',
+          imageId: id,
+          clientId,
+          groupOperationId: batchOperation.id,
+          errorMessage: 'Image not found or already deleted',
+        });
+      }
+    }
+
+    // Update batch operation summary
+    await updateBatchOperationSummary(
+      batchOperation.id,
+      deletedImages.length,
+      failedCount
+    );
 
     res.json({
       success: true,
@@ -178,7 +258,59 @@ export class ImagesController {
       throw new AppError('No valid image UUIDs provided', 400);
     }
 
+    const clientId = getClientId(req);
+
+    // Create batch operation parent
+    const batchOperation = await createBatchOperation({
+      operation: 'batch_delete',
+      clientId,
+      totalCount: validUuids.length,
+      metadata: {
+        request_source: 'api',
+        delete_by: 'uuids',
+      },
+    });
+
     const deletedImages = await batchSoftDeleteImagesByUuid(validUuids);
+
+    // Log each successful deletion
+    for (const deletedImage of deletedImages) {
+      await logSuccessfulOperation({
+        operation: 'delete',
+        imageId: deletedImage.id,
+        clientId,
+        groupOperationId: batchOperation.id,
+        metadata: {
+          uuid: deletedImage.uuid,
+          filename: deletedImage.filename,
+          original_name: deletedImage.originalName,
+        },
+      });
+    }
+
+    // Log failed deletions
+    const failedCount = validUuids.length - deletedImages.length;
+    const deletedUuids = new Set(deletedImages.map(img => img.uuid));
+    for (const uuid of validUuids) {
+      if (!deletedUuids.has(uuid)) {
+        await logFailedOperation({
+          operation: 'delete',
+          clientId,
+          groupOperationId: batchOperation.id,
+          errorMessage: 'Image not found or already deleted',
+          metadata: {
+            uuid,
+          },
+        });
+      }
+    }
+
+    // Update batch operation summary
+    await updateBatchOperationSummary(
+      batchOperation.id,
+      deletedImages.length,
+      failedCount
+    );
 
     res.json({
       success: true,
@@ -203,6 +335,22 @@ export class ImagesController {
     const files = Array.isArray(req.files) ? req.files : [req.files.images];
     const uploadedImages = [];
     const errors = [];
+    const clientId = getClientId(req);
+
+    // Create batch operation if multiple files
+    let batchOperation = null;
+    if (files.flat().length > 1) {
+      batchOperation = await createBatchOperation({
+        operation: 'batch_upload',
+        clientId,
+        totalCount: files.flat().length,
+        metadata: {
+          request_source: 'api',
+          user_agent: req.get('user-agent'),
+          ip_address: req.ip,
+        },
+      });
+    }
 
     for (const file of files.flat()) {
       try {
@@ -259,12 +407,46 @@ export class ImagesController {
         // Create image with EXIF data
         const newImage = await createImageWithExif(imageData, exifData || undefined);
         uploadedImages.push(newImage);
+
+        // Log successful upload to sync log
+        await logSuccessfulOperation({
+          operation: 'upload',
+          imageId: newImage.id,
+          clientId,
+          groupOperationId: batchOperation?.id,
+          metadata: {
+            original_filename: file.originalname,
+            file_size: imageMetadata.size,
+            file_hash: imageMetadata.hash,
+            is_corrupted: imageMetadata.isCorrupted,
+          },
+        });
       } catch (error: any) {
         errors.push({
           filename: file.originalname,
           error: error.message || 'Unknown error',
         });
+
+        // Log failed upload to sync log
+        await logFailedOperation({
+          operation: 'upload',
+          clientId,
+          groupOperationId: batchOperation?.id,
+          errorMessage: error.message || 'Unknown error',
+          metadata: {
+            original_filename: file.originalname,
+          },
+        });
       }
+    }
+
+    // Update batch operation summary if it was a batch
+    if (batchOperation) {
+      await updateBatchOperationSummary(
+        batchOperation.id,
+        uploadedImages.length,
+        errors.length
+      );
     }
 
     res.status(201).json({
@@ -530,6 +712,20 @@ export class ImagesController {
         logger.error('Error deleting old files:', error);
         // Don't fail the request if file deletion fails
       }
+
+      // Log replacement to sync log
+      const clientId = getClientId(req);
+      await logSuccessfulOperation({
+        operation: 'replace',
+        imageId: existingImage.id,
+        clientId,
+        metadata: {
+          old_filename: existingImage.filename,
+          new_filename: file.filename,
+          new_file_size: imageMetadata.size,
+          new_file_hash: imageMetadata.hash,
+        },
+      });
 
       res.json({
         success: true,
