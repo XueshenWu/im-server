@@ -6,6 +6,7 @@ import {
   getImageById,
   getImageByUuid,
   updateImage,
+  updateImageByUuid,
   softDeleteImage,
   batchSoftDeleteImages,
   batchSoftDeleteImagesByUuid,
@@ -14,6 +15,7 @@ import {
   createImageWithExif,
   getImageByHash,
   replaceImageByUuid,
+  getImagesSinceSequence,
 } from '../db/queries';
 import { getPaginatedImages, getPaginatedImagesWithExif, getPagePaginatedImages, getPagePaginatedImagesWithExif } from '../db/pagination.queries';
 import { AppError } from '../middleware/errorHandler';
@@ -30,17 +32,39 @@ import {
   updateBatchOperationSummary,
   logSuccessfulOperation,
   logFailedOperation,
+  getCurrentSyncSequence,
 } from '../utils/syncLogger';
 import { getClientId } from '../middleware/syncValidation';
 
 export class ImagesController {
   // Get all images
   async getAll(req: Request, res: Response) {
-    const images = await getAllImages();
+    const sinceParam = req.query.since as string | undefined;
+
+    let images;
+    if (sinceParam) {
+      // Incremental sync: get images modified since the given sequence
+      const sinceSequence = parseInt(sinceParam);
+
+      if (isNaN(sinceSequence)) {
+        throw new AppError('Invalid "since" parameter', 400);
+      }
+
+      // Get images modified after the given sync sequence
+      // We need to fetch from sync_log to find images touched after that sequence
+      images = await getImagesSinceSequence(sinceSequence);
+    } else {
+      images = await getAllImages();
+    }
+
+    const currentSequence = await getCurrentSyncSequence();
+
     res.json({
       success: true,
       count: images.length,
       data: images,
+      currentSequence,
+      hasMore: false, // For full sync this is always false; could be enhanced with pagination
     });
   }
 
@@ -51,6 +75,41 @@ export class ImagesController {
       success: true,
       count: images.length,
       data: images,
+    });
+  }
+
+  // Get minimal metadata for all images (for efficient sync state comparison)
+  async getMetadata(req: Request, res: Response) {
+    const sinceParam = req.query.since as string | undefined;
+
+    let images;
+    if (sinceParam) {
+      const sinceSequence = parseInt(sinceParam);
+
+      if (isNaN(sinceSequence)) {
+        throw new AppError('Invalid "since" parameter', 400);
+      }
+
+      images = await getImagesSinceSequence(sinceSequence);
+    } else {
+      images = await getAllImages();
+    }
+
+    const currentSequence = await getCurrentSyncSequence();
+
+    // Return only minimal metadata for efficient comparison
+    const metadata = images.map(img => ({
+      uuid: img.uuid,
+      hash: img.hash,
+      updatedAt: img.updatedAt,
+      fileSize: img.fileSize,
+    }));
+
+    res.json({
+      success: true,
+      count: metadata.length,
+      currentSequence,
+      data: metadata,
     });
   }
 
@@ -326,6 +385,124 @@ export class ImagesController {
     });
   }
 
+  // Batch update image metadata by UUIDs
+  async batchUpdate(req: Request, res: Response) {
+    const { updates } = req.body;
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      throw new AppError('Invalid request. Provide an array of image updates', 400);
+    }
+
+    // Validate all updates have UUID
+    for (const update of updates) {
+      if (!update.uuid || typeof update.uuid !== 'string') {
+        throw new AppError('Each update must have a valid UUID', 400);
+      }
+    }
+
+    const clientId = getClientId(req);
+
+    // Create batch operation parent
+    const batchOperation = await createBatchOperation({
+      operation: 'batch_update',
+      clientId,
+      totalCount: updates.length,
+      metadata: {
+        request_source: 'api',
+      },
+    });
+
+    const updatedImages = [];
+    const errors = [];
+
+    for (const update of updates) {
+      try {
+        const { uuid, ...updateData } = update;
+
+        // Only allow specific fields to be updated
+        const allowedFields: Partial<NewImage> = {};
+        if (updateData.filename) allowedFields.filename = updateData.filename;
+        if (updateData.originalName) allowedFields.originalName = updateData.originalName;
+
+        if (Object.keys(allowedFields).length === 0) {
+          errors.push({
+            uuid,
+            error: 'No valid fields to update',
+          });
+          continue;
+        }
+
+        // Update the image
+        const updatedImage = await updateImageByUuid(uuid, allowedFields);
+
+        if (!updatedImage) {
+          errors.push({
+            uuid,
+            error: 'Image not found',
+          });
+          await logFailedOperation({
+            operation: 'update',
+            clientId,
+            groupOperationId: batchOperation.id,
+            errorMessage: 'Image not found',
+            metadata: { uuid },
+          });
+          continue;
+        }
+
+        updatedImages.push(updatedImage);
+
+        // Log successful update
+        await logSuccessfulOperation({
+          operation: 'update',
+          imageId: updatedImage.id,
+          clientId,
+          groupOperationId: batchOperation.id,
+          metadata: {
+            uuid: updatedImage.uuid,
+            updated_fields: Object.keys(allowedFields),
+          },
+        });
+      } catch (error: any) {
+        errors.push({
+          uuid: update.uuid,
+          error: error.message || 'Unknown error',
+        });
+
+        await logFailedOperation({
+          operation: 'update',
+          clientId,
+          groupOperationId: batchOperation.id,
+          errorMessage: error.message || 'Unknown error',
+          metadata: {
+            uuid: update.uuid,
+          },
+        });
+      }
+    }
+
+    // Update batch operation summary
+    await updateBatchOperationSummary(
+      batchOperation.id,
+      updatedImages.length,
+      errors.length
+    );
+
+    res.json({
+      success: true,
+      message: `Updated ${updatedImages.length} of ${updates.length} images`,
+      data: {
+        updated: updatedImages,
+        stats: {
+          requested: updates.length,
+          successful: updatedImages.length,
+          failed: errors.length,
+        },
+        errors,
+      },
+    });
+  }
+
   // Upload single or multiple images
   async upload(req: Request, res: Response) {
     if (!req.files || (Array.isArray(req.files) && req.files.length === 0)) {
@@ -337,13 +514,34 @@ export class ImagesController {
     const errors = [];
     const clientId = getClientId(req);
 
+    // Extract client-provided UUIDs if present
+    const clientUuids = req.body.uuids ? JSON.parse(req.body.uuids) : null;
+
+    // Validate UUIDs if provided
+    if (clientUuids) {
+      if (!Array.isArray(clientUuids)) {
+        throw new AppError('uuids must be an array', 400);
+      }
+      if (clientUuids.length !== files.flat().length) {
+        throw new AppError('Number of UUIDs must match number of files', 400);
+      }
+      // Basic UUID format validation
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      for (const uuid of clientUuids) {
+        if (!uuidRegex.test(uuid)) {
+          throw new AppError(`Invalid UUID format: ${uuid}`, 400);
+        }
+      }
+    }
+
     // Create batch operation if multiple files
+    const flatFiles = files.flat();
     let batchOperation = null;
-    if (files.flat().length > 1) {
+    if (flatFiles.length > 1) {
       batchOperation = await createBatchOperation({
         operation: 'batch_upload',
         clientId,
-        totalCount: files.flat().length,
+        totalCount: flatFiles.length,
         metadata: {
           request_source: 'api',
           user_agent: req.get('user-agent'),
@@ -351,8 +549,8 @@ export class ImagesController {
         },
       });
     }
-
-    for (const file of files.flat()) {
+    for (let i = 0; i < flatFiles.length; i++) {
+      const file = flatFiles[i];
       try {
         // Get file paths
         const { imagePath, thumbnailPath, relativeImagePath, relativeThumbnailPath } =
@@ -390,7 +588,7 @@ export class ImagesController {
         }
 
         // Prepare image data
-        const imageData = {
+        const imageData: any = {
           filename: file.filename,
           originalName: file.originalname,
           filePath: relativeImagePath,
@@ -403,6 +601,11 @@ export class ImagesController {
           mimeType: file.mimetype,
           isCorrupted: imageMetadata.isCorrupted,
         };
+
+        // Use client-provided UUID if available
+        if (clientUuids && clientUuids[i]) {
+          imageData.uuid = clientUuids[i];
+        }
 
         // Create image with EXIF data
         const newImage = await createImageWithExif(imageData, exifData || undefined);
@@ -451,12 +654,12 @@ export class ImagesController {
 
     res.status(201).json({
       success: true,
-      message: `Uploaded ${uploadedImages.length} of ${files.flat().length} images`,
+      message: `Uploaded ${uploadedImages.length} of ${flatFiles.length} images`,
       data: {
         uploaded: uploadedImages,
         failed: errors,
         stats: {
-          total: files.flat().length,
+          total: flatFiles.length,
           successful: uploadedImages.length,
           failed: errors.length,
           corrupted: uploadedImages.filter(img => img.isCorrupted).length,

@@ -6,6 +6,7 @@ import { collectionsController } from '../controllers/collections.controller';
 import { asyncHandler } from '../middleware/errorHandler';
 import { upload } from '../middleware/upload';
 import { chunkUpload } from '../middleware/chunkUpload';
+import { validateSync } from '../middleware/syncValidation';
 
 
 
@@ -211,6 +212,48 @@ router.get('/paginated', asyncHandler(imagesController.getPaginated));
  *         description: Invalid parameters
  */
 router.get('/page', asyncHandler(imagesController.getPagePaginated));
+
+/**
+ * @swagger
+ * /api/images/metadata:
+ *   get:
+ *     summary: Get minimal metadata for all images (for efficient sync state comparison)
+ *     tags: [Images]
+ *     parameters:
+ *       - in: query
+ *         name: since
+ *         schema:
+ *           type: integer
+ *         description: Only return metadata for images modified since this sync sequence
+ *     responses:
+ *       200:
+ *         description: List of image metadata
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: integer
+ *                 currentSequence:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       uuid:
+ *                         type: string
+ *                       hash:
+ *                         type: string
+ *                       updatedAt:
+ *                         type: string
+ *                       fileSize:
+ *                         type: integer
+ */
+router.get('/metadata', asyncHandler(imagesController.getMetadata));
 
 /**
  * @swagger
@@ -492,7 +535,7 @@ router.get('/uuid/:uuid', asyncHandler(imagesController.getByUuid));
  *       404:
  *         description: Image not found
  */
-router.put('/uuid/:uuid/replace', upload.single('image'), asyncHandler(imagesController.replaceImage));
+router.put('/uuid/:uuid/replace', validateSync, upload.single('image'), asyncHandler(imagesController.replaceImage));
 
 /**
  * @swagger
@@ -541,7 +584,7 @@ router.put('/uuid/:uuid/replace', upload.single('image'), asyncHandler(imagesCon
  *       404:
  *         description: Image not found
  */
-router.post('/uuid/:uuid/replace/chunked/init', asyncHandler(chunkedUploadController.initReplaceUpload));
+router.post('/uuid/:uuid/replace/chunked/init', validateSync, asyncHandler(chunkedUploadController.initReplaceUpload));
 
 /**
  * @swagger
@@ -608,7 +651,7 @@ router.post('/uuid/:uuid/replace/chunked/upload/:sessionId', chunkUpload.single(
  *       404:
  *         description: Image or session not found
  */
-router.post('/uuid/:uuid/replace/chunked/complete/:sessionId', asyncHandler(chunkedUploadController.completeReplaceUpload));
+router.post('/uuid/:uuid/replace/chunked/complete/:sessionId', validateSync, asyncHandler(chunkedUploadController.completeReplaceUpload));
 
 /**
  * @swagger
@@ -646,7 +689,7 @@ router.post('/uuid/:uuid/replace/chunked/complete/:sessionId', asyncHandler(chun
  *                 data:
  *                   $ref: '#/components/schemas/Image'
  */
-router.put('/:id', asyncHandler(imagesController.update));
+router.put('/:id', validateSync, asyncHandler(imagesController.update));
 
 /**
  * @swagger
@@ -673,7 +716,7 @@ router.put('/:id', asyncHandler(imagesController.update));
  *                 message:
  *                   type: string
  */
-router.delete('/:id', asyncHandler(imagesController.delete));
+router.delete('/:id', validateSync, asyncHandler(imagesController.delete));
 
 /**
  * @swagger
@@ -730,7 +773,84 @@ router.delete('/:id', asyncHandler(imagesController.delete));
  *       400:
  *         description: Invalid request body
  */
-router.post('/batch/delete/ids', asyncHandler(imagesController.batchDeleteByIds));
+router.post('/batch/delete/ids', validateSync, asyncHandler(imagesController.batchDeleteByIds));
+
+/**
+ * @swagger
+ * /api/images/batch/update:
+ *   put:
+ *     summary: Batch update image metadata by UUIDs
+ *     tags: [Images]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - updates
+ *             properties:
+ *               updates:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - uuid
+ *                   properties:
+ *                     uuid:
+ *                       type: string
+ *                       format: uuid
+ *                     filename:
+ *                       type: string
+ *                     originalName:
+ *                       type: string
+ *                 description: Array of image updates with UUID and fields to update
+ *                 example:
+ *                   - uuid: "867130af-dbc1-40cd-99f2-fb75baf9b8e1"
+ *                     filename: "new-name.jpg"
+ *                   - uuid: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+ *                     originalName: "updated.png"
+ *     responses:
+ *       200:
+ *         description: Images updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     updated:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Image'
+ *                     stats:
+ *                       type: object
+ *                       properties:
+ *                         requested:
+ *                           type: integer
+ *                         successful:
+ *                           type: integer
+ *                         failed:
+ *                           type: integer
+ *                     errors:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           uuid:
+ *                             type: string
+ *                           error:
+ *                             type: string
+ *       400:
+ *         description: Invalid request body
+ */
+router.put('/batch/update', validateSync, asyncHandler(imagesController.batchUpdate));
 
 /**
  * @swagger
@@ -788,7 +908,7 @@ router.post('/batch/delete/ids', asyncHandler(imagesController.batchDeleteByIds)
  *       400:
  *         description: Invalid request body
  */
-router.post('/batch/delete/uuids', asyncHandler(imagesController.batchDeleteByUuids));
+router.post('/batch/delete/uuids', validateSync, asyncHandler(imagesController.batchDeleteByUuids));
 
 /**
  * @swagger
@@ -814,7 +934,7 @@ router.post('/batch/delete/uuids', asyncHandler(imagesController.batchDeleteByUu
  *       400:
  *         description: No files uploaded or invalid format
  */
-router.post('/upload', upload.array('images', 30), asyncHandler(imagesController.upload));
+router.post('/upload', validateSync, upload.array('images', 30), asyncHandler(imagesController.upload));
 
 /**
  * @swagger
@@ -902,7 +1022,7 @@ router.post('/batch', asyncHandler(imagesController.batchUpload));
  *       400:
  *         description: Invalid request
  */
-router.post('/chunked/init', asyncHandler(chunkedUploadController.initUpload));
+router.post('/chunked/init', validateSync, asyncHandler(chunkedUploadController.initUpload));
 
 /**
  * @swagger
@@ -1006,7 +1126,7 @@ router.post('/chunked/upload/:sessionId', chunkUpload.single('chunk'), asyncHand
  *       410:
  *         description: Session expired
  */
-router.post('/chunked/complete/:sessionId', asyncHandler(chunkedUploadController.completeUpload));
+router.post('/chunked/complete/:sessionId', validateSync, asyncHandler(chunkedUploadController.completeUpload));
 
 /**
  * @swagger

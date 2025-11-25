@@ -18,6 +18,57 @@ export async function getAllImages() {
 }
 
 /**
+ * Get images modified since a given timestamp
+ */
+export async function getImagesSince(sinceDate: Date) {
+  return await db
+    .select()
+    .from(images)
+    .where(
+      and(
+        isNull(images.deletedAt),
+        sql`${images.updatedAt} > ${sinceDate}`
+      )
+    )
+    .orderBy(desc(images.updatedAt));
+}
+
+/**
+ * Get images affected by sync operations since a given sequence number
+ * This includes newly created, updated, and non-deleted images
+ */
+export async function getImagesSinceSequence(sinceSequence: number) {
+  // Get all imageIds from sync operations after the sequence
+  const affectedOperations = await db
+    .select({
+      imageId: syncLog.imageId,
+    })
+    .from(syncLog)
+    .where(sql`${syncLog.syncSequence} > ${sinceSequence}`)
+    .groupBy(syncLog.imageId);
+
+  const imageIds = affectedOperations
+    .map(op => op.imageId)
+    .filter((id): id is number => id !== null);
+
+  if (imageIds.length === 0) {
+    return [];
+  }
+
+  // Fetch the actual images (exclude deleted ones)
+  return await db
+    .select()
+    .from(images)
+    .where(
+      and(
+        inArray(images.id, imageIds),
+        isNull(images.deletedAt)
+      )
+    )
+    .orderBy(desc(images.updatedAt));
+}
+
+/**
  * Get images with EXIF data
  */
 export async function getImagesWithExif() {
@@ -98,6 +149,19 @@ export async function updateImage(id: number, image: Partial<NewImage>) {
     .update(images)
     .set({ ...image, updatedAt: new Date() })
     .where(eq(images.id, id))
+    .returning();
+
+  return result[0] || null;
+}
+
+/**
+ * Update image by UUID
+ */
+export async function updateImageByUuid(uuid: string, image: Partial<NewImage>) {
+  const result = await db
+    .update(images)
+    .set({ ...image, updatedAt: new Date() })
+    .where(and(eq(images.uuid, uuid), isNull(images.deletedAt)))
     .returning();
 
   return result[0] || null;
