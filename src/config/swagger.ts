@@ -14,8 +14,8 @@ const options: Options = {
     },
     servers: [
       {
-        url: 'http://localhost:3000',
-        description: 'Development server',
+        url: '/api',
+        description: 'API server',
       },
     ],
     tags: [

@@ -4,6 +4,13 @@ import { VitePluginNode } from 'vite-plugin-node';
 export default defineConfig({
   server: {
     port: 3000,
+    // proxy:{
+    //  '/api': {
+    //     target: 'http://10.255.255.254:3000',
+    //     changeOrigin: true,
+    //     secure: false,
+    //   }
+    // }
   },
   plugins: [
     ...VitePluginNode({

@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "vite build",
     "start": "node dist/index.js",
     "preview": "vite preview",

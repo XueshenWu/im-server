@@ -14,6 +14,7 @@ import 'dotenv/config';
 
 const app: Application = express();
 const PORT = process.env.API_PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Middleware
 app.use(helmet({
@@ -86,10 +87,10 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 // Start server
-app.listen(PORT, () => {
-  logger.info(`Server is running on http://localhost:${PORT}`);
-  logger.info(`API Documentation: http://localhost:${PORT}/api-docs`);
-  logger.info(`Health Check: http://localhost:${PORT}/api/health`);
+app.listen(Number(PORT), HOST, () => {
+  logger.info(`Server is running on http://${HOST}:${PORT}`);
+  logger.info(`API Documentation: http://${HOST}:${PORT}/api-docs`);
+  logger.info(`Health Check: http://${HOST}:${PORT}/api/health`);
 });
 
 export default app;
