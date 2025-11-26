@@ -912,6 +912,59 @@ router.post('/batch/delete/uuids', validateSync, asyncHandler(imagesController.b
 
 /**
  * @swagger
+ * /api/images/batch/get/uuids:
+ *   post:
+ *     summary: Get multiple images by UUIDs
+ *     tags: [Images]
+ *     parameters:
+ *       - in: query
+ *         name: withExif
+ *         schema:
+ *           type: boolean
+ *         description: Include EXIF data
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - uuids
+ *             properties:
+ *               uuids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uuid
+ *                 description: Array of image UUIDs to retrieve
+ *                 example: ["867130af-dbc1-40cd-99f2-fb75baf9b8e1", "f47ac10b-58cc-4372-a567-0e02b2c3d479"]
+ *     responses:
+ *       200:
+ *         description: Images retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: integer
+ *                   description: Number of images found
+ *                 requested:
+ *                   type: integer
+ *                   description: Number of UUIDs requested
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Image'
+ *       400:
+ *         description: Invalid request body
+ */
+router.post('/batch/get/uuids',  asyncHandler(imagesController.getImagesByUUID));
+
+/**
+ * @swagger
  * /api/images/upload:
  *   post:
  *     summary: Upload images

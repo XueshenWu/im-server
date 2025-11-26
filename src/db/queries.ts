@@ -107,6 +107,33 @@ export async function getImageByUuid(uuid: string) {
 }
 
 /**
+ * Get multiple images by UUIDs
+ */
+export async function getImagesByUuids(uuids: string[]) {
+  if (uuids.length === 0) return [];
+
+  return await db
+    .select()
+    .from(images)
+    .where(and(inArray(images.uuid, uuids), isNull(images.deletedAt)))
+    .orderBy(desc(images.createdAt));
+}
+
+/**
+ * Get multiple images with EXIF data by UUIDs
+ */
+export async function getImagesWithExifByUuids(uuids: string[]) {
+  if (uuids.length === 0) return [];
+
+  return await db
+    .select()
+    .from(images)
+    .leftJoin(exifData, eq(images.id, exifData.imageId))
+    .where(and(inArray(images.uuid, uuids), isNull(images.deletedAt)))
+    .orderBy(desc(images.createdAt));
+}
+
+/**
  * Get image by hash (for duplicate detection)
  */
 export async function getImageByHash(hash: string) {

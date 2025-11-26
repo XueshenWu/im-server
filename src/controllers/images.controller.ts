@@ -5,6 +5,8 @@ import {
   getAllImages,
   getImageById,
   getImageByUuid,
+  getImagesByUuids,
+  getImagesWithExifByUuids,
   updateImage,
   updateImageByUuid,
   softDeleteImage,
@@ -715,6 +717,41 @@ export class ImagesController {
         hasMore: result.hasMore,
         limit,
       },
+    });
+  }
+
+  async getImagesByUUID(req: Request, res: Response){
+    const { uuids } = req.body;
+    const withExif = req.query.withExif === 'true';
+
+    if (!Array.isArray(uuids) || uuids.length === 0) {
+      throw new AppError('Invalid request. Provide an array of image UUIDs', 400);
+    }
+
+    // Validate all UUIDs are strings and have valid format
+    const validUuids = uuids.filter(uuid => typeof uuid === 'string' && uuid.length > 0);
+
+    if (validUuids.length === 0) {
+      throw new AppError('No valid image UUIDs provided', 400);
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    for (const uuid of validUuids) {
+      if (!uuidRegex.test(uuid)) {
+        throw new AppError(`Invalid UUID format: ${uuid}`, 400);
+      }
+    }
+
+    const images = withExif
+      ? await getImagesWithExifByUuids(validUuids)
+      : await getImagesByUuids(validUuids);
+
+    res.json({
+      success: true,
+      count: images.length,
+      requested: validUuids.length,
+      data: images,
     });
   }
 
