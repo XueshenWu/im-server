@@ -123,7 +123,7 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
  *       400:
  *         description: Invalid parameters
  */
-router.get('/paginated', asyncHandler(imagesController.getPaginated));
+router.get('/paginated', validateSync, asyncHandler(imagesController.getPaginated));
 
 /**
  * @swagger
@@ -211,7 +211,7 @@ router.get('/paginated', asyncHandler(imagesController.getPaginated));
  *       400:
  *         description: Invalid parameters
  */
-router.get('/page', asyncHandler(imagesController.getPagePaginated));
+router.get('/page', validateSync, asyncHandler(imagesController.getPagePaginated));
 
 /**
  * @swagger
@@ -253,7 +253,7 @@ router.get('/page', asyncHandler(imagesController.getPagePaginated));
  *                       fileSize:
  *                         type: integer
  */
-router.get('/metadata', asyncHandler(imagesController.getMetadata));
+router.get('/metadata', validateSync, asyncHandler(imagesController.getMetadata));
 
 /**
  * @swagger
@@ -274,7 +274,7 @@ router.get('/metadata', asyncHandler(imagesController.getMetadata));
  *                 data:
  *                   $ref: '#/components/schemas/ImageStats'
  */
-router.get('/stats', asyncHandler(imagesController.getStats));
+router.get('/stats', validateSync, asyncHandler(imagesController.getStats));
 
 /**
  * @swagger
@@ -461,7 +461,7 @@ router.get('/file/uuid/:uuid', asyncHandler(imagesController.getFileByUuid));
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.get('/:id', asyncHandler(imagesController.getById));
+router.get('/:id', validateSync, asyncHandler(imagesController.getById));
 
 /**
  * @swagger
@@ -492,7 +492,7 @@ router.get('/:id', asyncHandler(imagesController.getById));
  *       404:
  *         description: Image not found
  */
-router.get('/uuid/:uuid', asyncHandler(imagesController.getByUuid));
+router.get('/uuid/:uuid', validateSync, asyncHandler(imagesController.getByUuid));
 
 /**
  * @swagger
@@ -1183,7 +1183,7 @@ router.post('/chunked/complete/:sessionId', validateSync, asyncHandler(chunkedUp
  *       404:
  *         description: Session not found
  */
-router.get('/chunked/status/:sessionId', asyncHandler(chunkedUploadController.getStatus));
+router.get('/chunked/status/:sessionId', validateSync, asyncHandler(chunkedUploadController.getStatus));
 
 /**
  * @swagger

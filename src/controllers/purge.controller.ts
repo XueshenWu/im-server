@@ -83,13 +83,13 @@ export class PurgeController {
       // 4. Delete all database records (in correct order due to foreign keys)
       try {
         // Delete EXIF data first (has foreign key to images)
-        const deletedExif = await db.delete(exifData);
+        await db.delete(exifData);
 
         // Delete sync logs (has foreign key to images)
         await db.delete(syncLog);
 
-        // Delete images last
-        const deletedImages = await db.delete(images);
+        // Delete images last and get count
+        const deletedImages = await db.delete(images).returning();
 
         results.deletedDatabaseRecords = deletedImages.length;
       } catch (error: any) {
@@ -218,7 +218,7 @@ export class PurgeController {
       // Delete in correct order due to foreign keys
       await db.delete(exifData);
       await db.delete(syncLog);
-      const deletedImages = await db.delete(images);
+      const deletedImages = await db.delete(images).returning();
 
       res.json({
         success: true,

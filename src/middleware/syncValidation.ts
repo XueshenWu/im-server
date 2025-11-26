@@ -67,46 +67,57 @@ export const validateSync = async (
       throw new AppError('Invalid sync sequence number', 400);
     }
 
-    // Check if client is in sync (fast-forward scenario)
-    if (lastSyncSequence === currentSequence) {
-      // Client is up to date
-      syncReq.sync.isInSync = true;
-      res.setHeader('X-Current-Sequence', currentSequence.toString());
-      return next();
+    // Determine if client is in sync
+    const isInSync = lastSyncSequence === currentSequence;
+    const operationsBehind = Math.max(0, currentSequence - lastSyncSequence);
+
+    // Log sync state for monitoring (but don't block operations)
+    if (!isInSync) {
+      logger.info(
+        `Client behind: Client at sequence ${lastSyncSequence}, server at ${currentSequence} (${operationsBehind} operations behind)`
+      );
     }
 
-    // Client is behind (conflict scenario)
-    if (lastSyncSequence < currentSequence) {
-      const operationsBehind = currentSequence - lastSyncSequence;
+    // Set sync status in request for controllers to use
+    syncReq.sync.isInSync = isInSync;
 
-      logger.warn(
-        `Sync conflict: Client at sequence ${lastSyncSequence}, server at ${currentSequence} (${operationsBehind} operations behind)`
-      );
-
-      res.setHeader('X-Current-Sequence', currentSequence.toString());
+    // Set pre-operation sequence info in headers (for monitoring)
+    if (!isInSync) {
       res.setHeader('X-Client-Sequence', lastSyncSequence.toString());
       res.setHeader('X-Operations-Behind', operationsBehind.toString());
-
-      throw new AppError(
-        `Sync conflict: You are ${operationsBehind} operation(s) behind. Please sync first (GET /api/sync/operations?since=${lastSyncSequence})`,
-        409 // Conflict status code
-      );
     }
 
-    // Client sequence is ahead of server (should never happen unless client is lying or server lost data)
+    // Client sequence ahead of server is suspicious but don't block
+    // (could happen during development, server resets, etc.)
     if (lastSyncSequence > currentSequence) {
-      logger.error(
-        `Invalid state: Client sequence (${lastSyncSequence}) > Server sequence (${currentSequence})`
-      );
-
-      throw new AppError(
-        'Invalid sync state: Client sequence is ahead of server. Please reset your sync.',
-        409
+      logger.warn(
+        `Client sequence ahead: Client at ${lastSyncSequence}, server at ${currentSequence}. Client may need to reset sync state.`
       );
     }
 
-    // This should never be reached
-    throw new AppError('Unexpected sync validation state', 500);
+    // Store original json method
+    const originalJson = res.json.bind(res);
+
+    // Override res.json to update sequence before sending
+    (res as any).json = async function(body: any) {
+      // Always get the latest sequence before sending response
+      // This ensures client gets the most up-to-date sequence for:
+      // - Write operations: sequence AFTER the operation is logged
+      // - Read operations: current server sequence (for cloud mode sync)
+      try {
+        const finalSequence = await getCurrentSyncSequence();
+        res.setHeader('X-Current-Sequence', finalSequence.toString());
+      } catch (err) {
+        logger.error('Failed to get final sequence:', err);
+        // Fallback to sequence from before operation if query fails
+        res.setHeader('X-Current-Sequence', currentSequence.toString());
+      }
+
+      return originalJson(body);
+    };
+
+    // Allow the operation to proceed
+    return next();
   } catch (error) {
     // If error is already AppError, pass it through
     if (error instanceof AppError) {
