@@ -18,6 +18,7 @@ import {
   getImageByHash,
   replaceImageByUuid,
   getImagesSinceSequence,
+  insertPendingImages,
 } from '../db/queries';
 import { getPaginatedImages, getPaginatedImagesWithExif, getPagePaginatedImages, getPagePaginatedImagesWithExif } from '../db/pagination.queries';
 import { AppError } from '../middleware/errorHandler';
@@ -27,7 +28,7 @@ import {
   extractExifData,
   getFileExtension,
 } from '../utils/imageProcessor';
-import { getImagePaths } from '../middleware/upload';
+import { getImagePaths, getTempImagePaths, IMAGES_DIR, THUMBNAILS_DIR } from '../middleware/upload';
 import logger from '../config/logger';
 import {
   createBatchOperation,
@@ -37,8 +38,11 @@ import {
   getCurrentSyncSequence,
 } from '../utils/syncLogger';
 import { getClientId } from '../middleware/syncValidation';
+import { Image, NewImage } from '../db/schema';
+import { generatePresignedUrl, generatePresignedGetUrl, getThumbnailStream } from '../config/minio';
 
 export class ImagesController {
+
   // Get all images
   async getAll(req: Request, res: Response) {
     const sinceParam = req.query.since as string | undefined;
@@ -71,7 +75,7 @@ export class ImagesController {
   }
 
   // Get images with EXIF data
-  async getAllWithExif(req: Request, res: Response) {
+  getAllWithExif = async (req: Request, res: Response) => {
     const images = await getImagesWithExif();
     res.json({
       success: true,
@@ -192,7 +196,7 @@ export class ImagesController {
   }
 
   // Soft delete image
-  async delete(req: Request, res: Response) {
+  delete = async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
 
     if (isNaN(id)) {
@@ -213,7 +217,7 @@ export class ImagesController {
       clientId,
       metadata: {
         filename: deletedImage.filename,
-        original_name: deletedImage.originalName,
+        uuid: deletedImage.uuid,
       },
     });
 
@@ -263,7 +267,7 @@ export class ImagesController {
         groupOperationId: batchOperation.id,
         metadata: {
           filename: deletedImage.filename,
-          original_name: deletedImage.originalName,
+          uuid: deletedImage.uuid,
         },
       });
     }
@@ -344,7 +348,6 @@ export class ImagesController {
         metadata: {
           uuid: deletedImage.uuid,
           filename: deletedImage.filename,
-          original_name: deletedImage.originalName,
         },
       });
     }
@@ -424,7 +427,6 @@ export class ImagesController {
         // Only allow specific fields to be updated
         const allowedFields: Partial<NewImage> = {};
         if (updateData.filename) allowedFields.filename = updateData.filename;
-        if (updateData.originalName) allowedFields.originalName = updateData.originalName;
 
         if (Object.keys(allowedFields).length === 0) {
           errors.push({
@@ -502,11 +504,42 @@ export class ImagesController {
         },
         errors,
       },
+    }); 1
+  }
+
+
+  presignURLs = async (req: Request, res: Response) => {
+    const { images } = req.body;
+
+    if (!Array.isArray(images) || images.length === 0) {
+      throw new AppError('No files uploaded', 400);
+    }
+
+    await insertPendingImages(images);
+
+
+    const signedUrls = (await Promise.allSettled(images.map((image: Image) => {
+      if (!image.mimeType) {
+        throw new AppError(`Missing mimeType for image ${image.uuid}`, 400);
+      }
+      return generatePresignedUrl(image.uuid, image.mimeType);
+    }))).map((result, index) => {
+        if (result.status === 'fulfilled') {
+          return result.value;
+        } else {
+          return {}
+        }
+      })
+    console.log(`presigned URLs: ${JSON.stringify(signedUrls)}`)
+    res.json({
+      success: true,
+      data: signedUrls
     });
   }
 
+
   // Upload single or multiple images
-  async upload(req: Request, res: Response) {
+  upload = async (req: Request, res: Response) => {
     if (!req.files || (Array.isArray(req.files) && req.files.length === 0)) {
       throw new AppError('No files uploaded', 400);
     }
@@ -553,17 +586,17 @@ export class ImagesController {
     }
     for (let i = 0; i < flatFiles.length; i++) {
       const file = flatFiles[i];
-      try {
-        // Get file paths
-        const { imagePath, thumbnailPath, relativeImagePath, relativeThumbnailPath } =
-          getImagePaths(file.filename);
+      const tempFilePath = path.join(IMAGES_DIR, file.filename);
 
-        // Process image and get metadata
-        const imageMetadata = await processImage(imagePath);
+      try {
+        // Process image and get metadata from temp file
+        const imageMetadata = await processImage(tempFilePath);
 
         // Check for duplicates by hash
         const existingImage = await getImageByHash(imageMetadata.hash);
         if (existingImage) {
+          // Delete temp file
+          await fs.unlink(tempFilePath).catch(() => { });
           errors.push({
             filename: file.originalname,
             error: 'Duplicate image (already exists)',
@@ -572,31 +605,18 @@ export class ImagesController {
           continue;
         }
 
-        // Generate thumbnail if image is not corrupted
-        let finalThumbnailPath = null;
-        if (!imageMetadata.isCorrupted) {
-          try {
-            await generateThumbnail(imagePath, thumbnailPath);
-            finalThumbnailPath = relativeThumbnailPath;
-          } catch (error) {
-            logger.error('Error generating thumbnail:', error);
-          }
-        }
-
         // Extract EXIF data
         let exifData = null;
         if (!imageMetadata.isCorrupted) {
-          exifData = await extractExifData(imagePath);
+          exifData = await extractExifData(tempFilePath);
         }
 
         // Prepare image data
+        const format = getFileExtension(file.originalname);
         const imageData: any = {
-          filename: file.filename,
-          originalName: file.originalname,
-          filePath: relativeImagePath,
-          thumbnailPath: finalThumbnailPath,
+          filename: file.originalname, // Store original filename for display
           fileSize: imageMetadata.size,
-          format: getFileExtension(file.originalname),
+          format: format,
           width: imageMetadata.width || null,
           height: imageMetadata.height || null,
           hash: imageMetadata.hash,
@@ -609,8 +629,22 @@ export class ImagesController {
           imageData.uuid = clientUuids[i];
         }
 
-        // Create image with EXIF data
+        // Create image with EXIF data (UUID will be auto-generated if not provided)
         const newImage = await createImageWithExif(imageData, exifData || undefined);
+
+        // Rename temp file to UUID-based filename
+        const { imagePath, thumbnailPath } = getImagePaths(newImage.uuid, format);
+        await fs.rename(tempFilePath, imagePath);
+
+        // Generate thumbnail if image is not corrupted
+        if (!imageMetadata.isCorrupted) {
+          try {
+            await generateThumbnail(imagePath, thumbnailPath);
+          } catch (error) {
+            logger.error('Error generating thumbnail:', error);
+          }
+        }
+
         uploadedImages.push(newImage);
 
         // Log successful upload to sync log
@@ -671,7 +705,7 @@ export class ImagesController {
   }
 
   // Batch upload from folder configuration
-  async batchUpload(req: Request, res: Response) {
+  batchUpload = async (req: Request, res: Response) => {
     // TODO: Implement batch upload from folder config JSON
     res.status(501).json({
       success: false,
@@ -680,12 +714,12 @@ export class ImagesController {
   }
 
   // Get paginated images with cursor-based pagination
-  async getPaginated(req: Request, res: Response) {
+  getPaginated = async (req: Request, res: Response) => {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
     const cursor = req.query.cursor as string | undefined;
     const collectionId = req.query.collectionId ? parseInt(req.query.collectionId as string) : undefined;
     const withExif = req.query.withExif === 'true';
-    const sortBy = req.query.sortBy as 'name' | 'size' | 'type' | 'updatedAt' | 'createdAt' |undefined;
+    const sortBy = req.query.sortBy as 'name' | 'size' | 'type' | 'updatedAt' | 'createdAt' | undefined;
     const sortOrder = req.query.sortOrder as 'asc' | 'desc' | undefined;
 
     if (limit && (isNaN(limit) || limit < 1 || limit > 100)) {
@@ -720,7 +754,7 @@ export class ImagesController {
     });
   }
 
-  async getImagesByUUID(req: Request, res: Response){
+  getImagesByUUID = async (req: Request, res: Response) => {
     const { uuids } = req.body;
     const withExif = req.query.withExif === 'true';
 
@@ -756,7 +790,7 @@ export class ImagesController {
   }
 
   // Get paginated images with page-based pagination
-  async getPagePaginated(req: Request, res: Response) {
+  getPagePaginated = async (req: Request, res: Response) => {
     const page = req.query.page ? parseInt(req.query.page as string) : 1;
     const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string) : 20;
     const collectionId = req.query.collectionId ? parseInt(req.query.collectionId as string) : undefined;
@@ -796,10 +830,10 @@ export class ImagesController {
     });
   }
 
-  // Get image file by ID with optional metadata
+  // Get image file by ID - returns presigned URL for download
   async getFileById(req: Request, res: Response) {
     const id = parseInt(req.params.id);
-    const includeInfo = req.query.info === 'true';
+    const expiry = req.query.expiry ? parseInt(req.query.expiry as string) : 3600; // Default 1 hour
 
     if (isNaN(id)) {
       throw new AppError('Invalid image ID', 400);
@@ -811,37 +845,36 @@ export class ImagesController {
       throw new AppError('Image not found', 404);
     }
 
-    // Get the absolute file path
-    const filePath = path.join(process.cwd(), 'storage', 'images', path.basename(image.filePath));
+    // Generate presigned GET URL for the image
+    const presignedUrl = await generatePresignedGetUrl(image.uuid, image.format, expiry);
 
-    // If includeInfo is true, send metadata in headers
-    if (includeInfo) {
-      res.setHeader('X-Image-Id', image.id.toString());
-      res.setHeader('X-Image-UUID', image.uuid);
-      res.setHeader('X-Image-Filename', image.filename);
-      res.setHeader('X-Image-Original-Name', image.originalName);
-      res.setHeader('X-Image-Format', image.format);
-      res.setHeader('X-Image-File-Size', image.fileSize.toString());
-      if (image.width) res.setHeader('X-Image-Width', image.width.toString());
-      if (image.height) res.setHeader('X-Image-Height', image.height.toString());
-      res.setHeader('X-Image-Hash', image.hash);
-      res.setHeader('X-Image-Created-At', image.createdAt.toISOString());
-      res.setHeader('X-Image-Updated-At', image.updatedAt.toISOString());
-      if (image.isCorrupted) res.setHeader('X-Image-Is-Corrupted', 'true');
-    }
-
-    // Send the file
-    res.sendFile(filePath, (err) => {
-      if (err) {
-        throw new AppError('Error sending file', 500);
-      }
+    res.json({
+      success: true,
+      data: {
+        uuid: image.uuid,
+        filename: image.filename,
+        url: presignedUrl,
+        expiresIn: expiry,
+        metadata: {
+          id: image.id,
+          format: image.format,
+          fileSize: image.fileSize,
+          width: image.width,
+          height: image.height,
+          hash: image.hash,
+          mimeType: image.mimeType,
+          isCorrupted: image.isCorrupted,
+          createdAt: image.createdAt,
+          updatedAt: image.updatedAt,
+        },
+      },
     });
   }
 
-  // Get image file by UUID with optional metadata
+  // Get image file by UUID - returns presigned URL for download
   async getFileByUuid(req: Request, res: Response) {
     const { uuid } = req.params;
-    const includeInfo = req.query.info === 'true';
+    const expiry = req.query.expiry ? parseInt(req.query.expiry as string) : 3600; // Default 1 hour
 
     const image = await getImageByUuid(uuid);
 
@@ -849,39 +882,75 @@ export class ImagesController {
       throw new AppError('Image not found', 404);
     }
 
-    // Get the absolute file path
-    const filePath = path.join(process.cwd(), 'storage', 'images', path.basename(image.filePath));
+    // Generate presigned GET URL for the image
+    const presignedUrl = await generatePresignedGetUrl(image.uuid, image.format, expiry);
 
-    // If includeInfo is true, send metadata in headers
-    if (includeInfo) {
-      res.setHeader('X-Image-Id', image.id.toString());
-      res.setHeader('X-Image-UUID', image.uuid);
-      res.setHeader('X-Image-Filename', image.filename);
-      res.setHeader('X-Image-Original-Name', image.originalName);
-      res.setHeader('X-Image-Format', image.format);
-      res.setHeader('X-Image-File-Size', image.fileSize.toString());
-      if (image.width) res.setHeader('X-Image-Width', image.width.toString());
-      if (image.height) res.setHeader('X-Image-Height', image.height.toString());
-      res.setHeader('X-Image-Hash', image.hash);
-      res.setHeader('X-Image-Created-At', image.createdAt.toISOString());
-      res.setHeader('X-Image-Updated-At', image.updatedAt.toISOString());
-      if (image.isCorrupted) res.setHeader('X-Image-Is-Corrupted', 'true');
-    }
-
-    // Send the file
-    res.sendFile(filePath, (err) => {
-      if (err) {
-        throw new AppError('Error sending file', 500);
-      }
+    res.json({
+      success: true,
+      data: {
+        uuid: image.uuid,
+        filename: image.filename,
+        presignedUrl: presignedUrl,
+        expiresIn: expiry,
+        metadata: {
+          id: image.id,
+          format: image.format,
+          fileSize: image.fileSize,
+          width: image.width,
+          height: image.height,
+          hash: image.hash,
+          mimeType: image.mimeType,
+          isCorrupted: image.isCorrupted,
+          createdAt: image.createdAt,
+          updatedAt: image.updatedAt,
+        },
+      },
     });
   }
 
-  // Replace image by UUID
-  async replaceImage(req: Request, res: Response) {
+  // Get thumbnail by UUID - streams directly from MinIO
+  async getThumbnailByUuid(req: Request, res: Response) {
     const { uuid } = req.params;
 
-    if (!req.file) {
-      throw new AppError('No file uploaded', 400);
+    const image = await getImageByUuid(uuid);
+
+    if (!image) {
+      throw new AppError('Image not found', 404);
+    }
+
+    try {
+      // Get thumbnail stream from MinIO
+      const stream = await getThumbnailStream(image.uuid);
+
+      // Set content type header
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+
+      // Pipe the stream to the response
+      stream.pipe(res);
+
+      stream.on('error', (error) => {
+        logger.error('Error streaming thumbnail:', error);
+        if (!res.headersSent) {
+          throw new AppError('Thumbnail not found', 404);
+        }
+      });
+    } catch (error: any) {
+      if (error.code === 'NotFound') {
+        throw new AppError('Thumbnail not found', 404);
+      }
+      throw new AppError('Error retrieving thumbnail', 500);
+    }
+  }
+
+  // Replace image by UUID - Update metadata and generate presigned URLs
+  async replaceImage(req: Request, res: Response) {
+    const { uuid } = req.params;
+    const { filename, format, mimeType, width, height, fileSize, hash } = req.body;
+
+    // Validate required fields
+    if (!filename || !format || !mimeType) {
+      throw new AppError('filename, format, and mimeType are required', 400);
     }
 
     // Check if image exists
@@ -890,97 +959,52 @@ export class ImagesController {
       throw new AppError('Image not found', 404);
     }
 
-    const file = req.file;
+    // Prepare image data for replacement
+    // Note: status, updatedAt, and deletedAt are handled by replaceImageByUuid
+    const imageData = {
+      filename,
+      format,
+      mimeType,
+      width: width || null,
+      height: height || null,
+      fileSize: fileSize || null,
+      hash: hash || null,
+    };
 
-    try {
-      // Get file paths for new image
-      const { imagePath, thumbnailPath, relativeImagePath, relativeThumbnailPath } =
-        getImagePaths(file.filename);
+    // Update image metadata in database
+    const replacedImage = await replaceImageByUuid(uuid, imageData, undefined);
 
-      // Process new image and get metadata
-      const imageMetadata = await processImage(imagePath);
+    // Generate presigned URLs for client to upload replacement image and thumbnail
+    const presignedUrls = await generatePresignedUrl(uuid, mimeType);
 
-      // Generate thumbnail if image is not corrupted
-      let finalThumbnailPath = null;
-      if (!imageMetadata.isCorrupted) {
-        try {
-          await generateThumbnail(imagePath, thumbnailPath);
-          finalThumbnailPath = relativeThumbnailPath;
-        } catch (error) {
-          logger.error('Error generating thumbnail:', error);
-        }
-      }
+    // Log replacement initiation to sync log
+    const clientId = getClientId(req);
+    await logSuccessfulOperation({
+      operation: 'replace',
+      imageId: existingImage.id,
+      clientId,
+      metadata: {
+        uuid,
+        old_filename: existingImage.filename,
+        old_format: existingImage.format,
+        new_filename: filename,
+        new_format: format,
+        status: 'pending',
+      },
+    });
 
-      // Extract EXIF data
-      let exifData = null;
-      if (!imageMetadata.isCorrupted) {
-        exifData = await extractExifData(imagePath);
-      }
-
-      // Prepare image data for replacement
-      const imageData = {
-        filename: file.filename,
-        originalName: file.originalname,
-        filePath: relativeImagePath,
-        thumbnailPath: finalThumbnailPath,
-        fileSize: imageMetadata.size,
-        format: getFileExtension(file.originalname),
-        width: imageMetadata.width || null,
-        height: imageMetadata.height || null,
-        hash: imageMetadata.hash,
-        mimeType: file.mimetype,
-        isCorrupted: imageMetadata.isCorrupted,
-      };
-
-      // Replace image in database
-      const replacedImage = await replaceImageByUuid(uuid, imageData, exifData || undefined);
-
-      // Delete old files (after successful database update)
-      try {
-        const oldImagePath = path.join(process.cwd(), 'storage', 'images', path.basename(existingImage.filePath));
-        await fs.unlink(oldImagePath).catch(() => {
-          logger.warn(`Could not delete old image file: ${oldImagePath}`);
-        });
-
-        if (existingImage.thumbnailPath) {
-          const oldThumbnailPath = path.join(process.cwd(), 'storage', 'thumbnails', path.basename(existingImage.thumbnailPath));
-          await fs.unlink(oldThumbnailPath).catch(() => {
-            logger.warn(`Could not delete old thumbnail file: ${oldThumbnailPath}`);
-          });
-        }
-      } catch (error) {
-        logger.error('Error deleting old files:', error);
-        // Don't fail the request if file deletion fails
-      }
-
-      // Log replacement to sync log
-      const clientId = getClientId(req);
-      await logSuccessfulOperation({
-        operation: 'replace',
-        imageId: existingImage.id,
-        clientId,
-        metadata: {
-          old_filename: existingImage.filename,
-          new_filename: file.filename,
-          new_file_size: imageMetadata.size,
-          new_file_hash: imageMetadata.hash,
+    res.json({
+      success: true,
+      message: 'Metadata updated, ready for client upload',
+      data: {
+        image: replacedImage,
+        uploadUrls: {
+          imageUrl: presignedUrls.imageUrl,
+          thumbnailUrl: presignedUrls.thumbnailUrl,
+          expiresIn: 900, // 15 minutes
         },
-      });
-
-      res.json({
-        success: true,
-        message: 'Image replaced successfully',
-        data: replacedImage,
-      });
-    } catch (error: any) {
-      // If replacement fails, delete the uploaded file
-      try {
-        const uploadedPath = path.join(process.cwd(), 'storage', 'images', file.filename);
-        await fs.unlink(uploadedPath).catch(() => {});
-      } catch {}
-
-      throw new AppError(error.message || 'Failed to replace image', 500);
-    }
+      },
+    });
   }
 }
 

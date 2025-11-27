@@ -4,7 +4,9 @@ import path from 'path';
 import { db } from '../db';
 import { images, exifData, syncLog } from '../db/schema';
 import { AppError } from '../middleware/errorHandler';
-import { redis } from '../config/redis';
+import { redisClient } from '../config/redis';
+import minioClient from '../config/minio';
+import { eq, and, lt, sql } from 'drizzle-orm';
 
 const IMAGES_DIR = './storage/images';
 const THUMBNAILS_DIR = './storage/thumbnails';
@@ -25,12 +27,17 @@ export class PurgeController {
       throw new AppError('Purge endpoint is disabled in production', 403);
     }
 
+    const BUCKET_IMAGES = process.env.MINIO_BUCKET_IMAGES || 'images';
+    const BUCKET_THUMBNAILS = process.env.MINIO_BUCKET_THUMBNAILS || 'thumbnails';
+
     const results = {
       deletedFiles: 0,
       deletedThumbnails: 0,
       deletedChunks: 0,
       deletedDatabaseRecords: 0,
       deletedRedisSessions: 0,
+      deletedMinioImages: 0,
+      deletedMinioThumbnails: 0,
       errors: [] as string[],
     };
 
@@ -98,13 +105,51 @@ export class PurgeController {
 
       // 5. Delete all Redis upload sessions
       try {
-        const keys = await redis.keys('upload:session:*');
+        const keys = await redisClient.keys('upload:session:*');
         if (keys.length > 0) {
-          await redis.del(...keys);
+          await redisClient.del(...keys);
           results.deletedRedisSessions = keys.length;
         }
       } catch (error: any) {
         results.errors.push(`Failed to delete Redis sessions: ${error.message}`);
+      }
+
+      // 6. Delete all objects from MinIO images bucket
+      try {
+        const imageStream = minioClient.listObjectsV2(BUCKET_IMAGES, '', true);
+        const imageObjects: string[] = [];
+
+        for await (const obj of imageStream) {
+          if (obj.name) {
+            imageObjects.push(obj.name);
+          }
+        }
+
+        if (imageObjects.length > 0) {
+          await minioClient.removeObjects(BUCKET_IMAGES, imageObjects);
+          results.deletedMinioImages = imageObjects.length;
+        }
+      } catch (error: any) {
+        results.errors.push(`Failed to purge MinIO images bucket: ${error.message}`);
+      }
+
+      // 7. Delete all objects from MinIO thumbnails bucket
+      try {
+        const thumbnailStream = minioClient.listObjectsV2(BUCKET_THUMBNAILS, '', true);
+        const thumbnailObjects: string[] = [];
+
+        for await (const obj of thumbnailStream) {
+          if (obj.name) {
+            thumbnailObjects.push(obj.name);
+          }
+        }
+
+        if (thumbnailObjects.length > 0) {
+          await minioClient.removeObjects(BUCKET_THUMBNAILS, thumbnailObjects);
+          results.deletedMinioThumbnails = thumbnailObjects.length;
+        }
+      } catch (error: any) {
+        results.errors.push(`Failed to purge MinIO thumbnails bucket: ${error.message}`);
       }
 
       res.json({
@@ -117,6 +162,8 @@ export class PurgeController {
             deletedChunkDirectories: results.deletedChunks,
             deletedDatabaseRecords: results.deletedDatabaseRecords,
             deletedRedisSessions: results.deletedRedisSessions,
+            deletedMinioImages: results.deletedMinioImages,
+            deletedMinioThumbnails: results.deletedMinioThumbnails,
           },
           errors: results.errors.length > 0 ? results.errors : undefined,
         },
@@ -242,11 +289,11 @@ export class PurgeController {
     }
 
     try {
-      const keys = await redis.keys('upload:session:*');
+      const keys = await redisClient.keys('upload:session:*');
       let deletedCount = 0;
 
       if (keys.length > 0) {
-        await redis.del(...keys);
+        await redisClient.del(...keys);
         deletedCount = keys.length;
       }
 
@@ -294,6 +341,79 @@ export class PurgeController {
       });
     } catch (error: any) {
       throw new AppError(`Chunk purge failed: ${error.message}`, 500);
+    }
+  }
+
+  /**
+   * Purge all objects from MinIO buckets
+   * DELETE /api/dev/purge/minio
+   */
+  async purgeMinio(req: Request, res: Response) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new AppError('Purge endpoint is disabled in production', 403);
+    }
+
+    const BUCKET_IMAGES = process.env.MINIO_BUCKET_IMAGES || 'images';
+    const BUCKET_THUMBNAILS = process.env.MINIO_BUCKET_THUMBNAILS || 'thumbnails';
+
+    const results = {
+      deletedImages: 0,
+      deletedThumbnails: 0,
+      errors: [] as string[],
+    };
+
+    try {
+      // Purge images bucket
+      try {
+        const imageStream = minioClient.listObjectsV2(BUCKET_IMAGES, '', true);
+        const imageObjects: string[] = [];
+
+        for await (const obj of imageStream) {
+          if (obj.name) {
+            imageObjects.push(obj.name);
+          }
+        }
+
+        if (imageObjects.length > 0) {
+          await minioClient.removeObjects(BUCKET_IMAGES, imageObjects);
+          results.deletedImages = imageObjects.length;
+        }
+      } catch (error: any) {
+        results.errors.push(`Failed to purge images bucket: ${error.message}`);
+      }
+
+      // Purge thumbnails bucket
+      try {
+        const thumbnailStream = minioClient.listObjectsV2(BUCKET_THUMBNAILS, '', true);
+        const thumbnailObjects: string[] = [];
+
+        for await (const obj of thumbnailStream) {
+          if (obj.name) {
+            thumbnailObjects.push(obj.name);
+          }
+        }
+
+        if (thumbnailObjects.length > 0) {
+          await minioClient.removeObjects(BUCKET_THUMBNAILS, thumbnailObjects);
+          results.deletedThumbnails = thumbnailObjects.length;
+        }
+      } catch (error: any) {
+        results.errors.push(`Failed to purge thumbnails bucket: ${error.message}`);
+      }
+
+      res.json({
+        success: true,
+        message: 'MinIO buckets purged',
+        data: {
+          summary: {
+            deletedImages: results.deletedImages,
+            deletedThumbnails: results.deletedThumbnails,
+          },
+          errors: results.errors.length > 0 ? results.errors : undefined,
+        },
+      });
+    } catch (error: any) {
+      throw new AppError(`MinIO purge failed: ${error.message}`, 500);
     }
   }
 }

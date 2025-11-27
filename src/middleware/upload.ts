@@ -1,7 +1,8 @@
 import multer from 'multer';
 import path from 'path';
 import { promises as fs } from 'fs';
-import { generateUniqueFilename } from '../utils/imageProcessor';
+import { v4 as uuidv4 } from 'uuid';
+import { getFileExtension } from '../utils/imageProcessor';
 
 // Allowed image formats
 const ALLOWED_FORMATS = ['.jpg', '.jpeg', '.png', '.tif', '.tiff'];
@@ -28,7 +29,8 @@ export async function ensureStorageDirectories(): Promise<void> {
 }
 
 /**
- * Multer storage configuration
+ * Multer storage configuration - UUID-based naming
+ * Files are stored as: {uuid}.{format}
  */
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
@@ -36,8 +38,10 @@ const storage = multer.diskStorage({
     cb(null, IMAGES_DIR);
   },
   filename: (req, file, cb) => {
-    const uniqueFilename = generateUniqueFilename(file.originalname);
-    cb(null, uniqueFilename);
+    // Generate UUID and keep original extension
+    const ext = path.extname(file.originalname).toLowerCase();
+    const uuid = uuidv4();
+    cb(null, `${uuid}${ext}`);
   },
 });
 
@@ -66,14 +70,28 @@ export const upload = multer({
 });
 
 /**
- * Get paths for uploaded files
+ * Get paths for UUID-based files
+ * @param uuid - Image UUID from database
+ * @param format - File format/extension (e.g., 'jpg', 'png')
  */
-export function getImagePaths(filename: string) {
+export function getImagePaths(uuid: string, format: string) {
+  const filename = `${uuid}.${format}`;
+  const thumbnailFilename = `${uuid}.jpg`; // Thumbnails are always JPEG
+
   return {
     imagePath: path.join(IMAGES_DIR, filename),
-    thumbnailPath: path.join(THUMBNAILS_DIR, filename.replace(/\.[^.]+$/, '.jpg')),
-    relativeImagePath: `/storage/images/${filename}`,
-    relativeThumbnailPath: `/storage/thumbnails/${filename.replace(/\.[^.]+$/, '.jpg')}`,
+    thumbnailPath: path.join(THUMBNAILS_DIR, thumbnailFilename),
+  };
+}
+
+/**
+ * Get paths from temporary uploaded filename
+ * Used during upload processing before UUID is assigned
+ */
+export function getTempImagePaths(tempFilename: string) {
+  return {
+    imagePath: path.join(IMAGES_DIR, tempFilename),
+    thumbnailPath: path.join(THUMBNAILS_DIR, tempFilename.replace(/\.[^.]+$/, '.jpg')),
   };
 }
 

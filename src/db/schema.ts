@@ -1,14 +1,15 @@
-import { pgTable, serial, varchar, text, bigint, integer, boolean, timestamp, decimal, jsonb, uuid } from 'drizzle-orm/pg-core';
+import { pgEnum, pgTable, serial, varchar, text, bigint, integer, boolean, timestamp, decimal, jsonb, uuid, bigserial } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
-// Images table
+export const statusEnum = pgEnum('image_status', ['pending', 'processed', 'failed']);
+
+// Images table - UUID-based file system
+// Files stored as: /storage/images/{uuid}.{format}
+// Thumbnails stored as: /storage/thumbnails/{uuid}.{format}
 export const images = pgTable('images', {
   id: serial('id').primaryKey(),
   uuid: uuid('uuid').defaultRandom().unique().notNull(),
-  filename: varchar('filename', { length: 255 }).notNull(),
-  originalName: varchar('original_name', { length: 255 }).notNull(),
-  filePath: text('file_path').notNull(),
-  thumbnailPath: text('thumbnail_path'),
+  filename: varchar('filename', { length: 255 }).notNull(), // Display name for user
   fileSize: bigint('file_size', { mode: 'number' }).notNull(),
   format: varchar('format', { length: 10 }).notNull(), // jpg, jpeg, png, tif, tiff
   width: integer('width'),
@@ -19,33 +20,65 @@ export const images = pgTable('images', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  status: statusEnum('status').default('pending').notNull(),
 });
 
 // EXIF data table
+
 export const exifData = pgTable('exif_data', {
   id: serial('id').primaryKey(),
-  imageId: integer('image_id').references(() => images.id, { onDelete: 'cascade' }).notNull().unique(),
-  cameraMake: varchar('camera_make', { length: 100 }),
-  cameraModel: varchar('camera_model', { length: 100 }),
-  lensModel: varchar('lens_model', { length: 100 }),
+  
+  // Foreign Key
+  imageId: integer('image_id')
+    .references(() => images.id, { onDelete: 'cascade' })
+    .notNull()
+    .unique(),
+
+  // Standard Fields - Increased length to 255 to be safe
+  cameraMake: varchar('camera_make', { length: 255 }),
+  cameraModel: varchar('camera_model', { length: 255 }),
+  lensModel: varchar('lens_model', { length: 255 }),
+  
   iso: integer('iso'),
+  
+  // These are strings in your extraction logic (e.g. "1/60", "f/1.8")
   shutterSpeed: varchar('shutter_speed', { length: 50 }),
   aperture: varchar('aperture', { length: 50 }),
   focalLength: varchar('focal_length', { length: 50 }),
+  
   dateTaken: timestamp('date_taken', { withTimezone: true }),
+
+  // GPS - Drizzle decimal accepts strings, which matches our .toString() logic
   gpsLatitude: decimal('gps_latitude', { precision: 10, scale: 8 }),
   gpsLongitude: decimal('gps_longitude', { precision: 11, scale: 8 }),
   gpsAltitude: decimal('gps_altitude', { precision: 10, scale: 2 }),
-  orientation: integer('orientation'),
-  metadata: jsonb('metadata'), // Additional EXIF data in JSON format
+
+  // CHANGED: Orientation is often returned as a string (e.g. "Horizontal (normal)") 
+  // by exifr. If you want strict integers (1-8), we'd need to change the extractor.
+  // Using varchar is the safest bet to avoid crashes.
+  orientation: varchar('orientation', { length: 50 }),
+
+  // Typed JSONB column for the extra fields
+  metadata: jsonb('metadata').$type<{
+    software?: string;
+    copyright?: string;
+    artist?: string;
+    whiteBalance?: string;
+    flash?: string;
+    exposureMode?: string;
+    meteringMode?: string;
+    colorSpace?: string;
+  }>(),
+
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+
 // Sync log table
 export const syncLog = pgTable('sync_log', {
   id: serial('id').primaryKey(),
-  syncSequence: bigint('sync_sequence', { mode: 'number' }).notNull().unique(),
+syncSequence: bigserial('sync_sequence', { mode: 'number' }).notNull().unique(),
   operation: varchar('operation', { length: 20 }).notNull(), // upload, download, update, delete, conflict, batch_upload, batch_delete, batch_update, replace
   imageId: integer('image_id').references(() => images.id, { onDelete: 'set null' }),
   clientId: varchar('client_id', { length: 100 }),
@@ -69,23 +102,9 @@ export const collections = pgTable('collections', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
 
-// Image-Collection junction table (many-to-many)
-export const imageCollections = pgTable('image_collections', {
-  id: serial('id').primaryKey(),
-  imageId: integer('image_id').references(() => images.id, { onDelete: 'cascade' }).notNull(),
-  collectionId: integer('collection_id').references(() => collections.id, { onDelete: 'cascade' }).notNull(),
-  addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
-});
 
-// Relations
-export const imagesRelations = relations(images, ({ one, many }) => ({
-  exifData: one(exifData, {
-    fields: [images.id],
-    references: [exifData.imageId],
-  }),
-  syncLogs: many(syncLog),
-  imageCollections: many(imageCollections),
-}));
+
+
 
 export const exifDataRelations = relations(exifData, ({ one }) => ({
   image: one(images, {
@@ -93,6 +112,7 @@ export const exifDataRelations = relations(exifData, ({ one }) => ({
     references: [images.id],
   }),
 }));
+
 
 export const syncLogRelations = relations(syncLog, ({ one, many }) => ({
   image: one(images, {
@@ -109,24 +129,7 @@ export const syncLogRelations = relations(syncLog, ({ one, many }) => ({
   }),
 }));
 
-export const collectionsRelations = relations(collections, ({ one, many }) => ({
-  coverImage: one(images, {
-    fields: [collections.coverImageId],
-    references: [images.id],
-  }),
-  imageCollections: many(imageCollections),
-}));
 
-export const imageCollectionsRelations = relations(imageCollections, ({ one }) => ({
-  image: one(images, {
-    fields: [imageCollections.imageId],
-    references: [images.id],
-  }),
-  collection: one(collections, {
-    fields: [imageCollections.collectionId],
-    references: [collections.id],
-  }),
-}));
 
 // Types
 export type Image = typeof images.$inferSelect;
@@ -140,6 +143,3 @@ export type NewSyncLog = typeof syncLog.$inferInsert;
 
 export type Collection = typeof collections.$inferSelect;
 export type NewCollection = typeof collections.$inferInsert;
-
-export type ImageCollection = typeof imageCollections.$inferSelect;
-export type NewImageCollection = typeof imageCollections.$inferInsert;

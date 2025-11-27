@@ -1,4 +1,5 @@
 import express, { Application } from 'express';
+import { setupMinio } from './utils/minio-setup';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -7,8 +8,8 @@ import { swaggerSpec } from './config/swagger';
 import { errorHandler } from './middleware/errorHandler';
 import imagesRoutes from './routes/images.routes';
 import healthRoutes from './routes/health.routes';
-import collectionsRoutes from './routes/collections.routes';
 import syncRoutes from './routes/sync.routes';
+import webhookRoutes from './routes/webhook.routes';
 import logger, { morganStream } from './config/logger';
 import 'dotenv/config';
 
@@ -55,6 +56,10 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'Image Management API Docs',
 }));
 
+
+app.use('/webhook', webhookRoutes);
+
+
 // Serve static files for uploaded images and thumbnails with CORS headers
 app.use('/storage', (_req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -67,7 +72,7 @@ app.use('/storage', (_req, res, next) => {
 app.use('/api/health', healthRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/images', imagesRoutes);
-app.use('/api/collections', collectionsRoutes);
+
 
 // Root endpoint - redirect to API docs
 app.get('/', (req, res) => {
@@ -86,11 +91,21 @@ app.use((req, res) => {
 // Error handler (must be last)
 app.use(errorHandler);
 
-// Start server
-app.listen(Number(PORT), HOST, () => {
-  logger.info(`Server is running on http://${HOST}:${PORT}`);
-  logger.info(`API Documentation: http://${HOST}:${PORT}/api-docs`);
-  logger.info(`Health Check: http://${HOST}:${PORT}/api/health`);
-});
+
+const startServer = async () => {
+
+  console.log("124sdf seETW")
+  await setupMinio();
+
+  // Start server
+  app.listen(Number(PORT), HOST, () => {
+    logger.info(`Server is running on http://${HOST}:${PORT}`);
+    logger.info(`API Documentation: http://${HOST}:${PORT}/api-docs`);
+    logger.info(`Health Check: http://${HOST}:${PORT}/api/health`);
+  });
+
+};
+
+startServer();
 
 export default app;

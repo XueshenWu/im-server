@@ -1,9 +1,17 @@
 import { db } from './index';
-import { images, imageCollections } from './schema';
+import { images } from './schema';
 import { eq, isNull, and, lt, gt, desc, asc, sql, SQL } from 'drizzle-orm';
 
 export type SortField = 'name' | 'size' | 'type' | 'updatedAt' | 'createdAt';
 export type SortOrder = 'asc' | 'desc';
+
+/**
+ * Helper: Filter for visible images (not deleted, status = 'processed')
+ */
+const isVisibleImage = () => and(
+  isNull(images.deletedAt),
+  eq(images.status, 'processed')
+);
 
 export interface PaginationParams {
   limit?: number;
@@ -45,7 +53,7 @@ export interface PagePaginatedResult<T> {
 function getSortColumn(sortBy?: SortField) {
   switch (sortBy) {
     case 'name':
-      return images.originalName;
+      return images.filename;
     case 'size':
       return images.fileSize;
     case 'type':
@@ -77,72 +85,34 @@ export async function getPaginatedImages(params: PaginationParams): Promise<Pagi
 
   let query;
 
-  if (params.collectionId) {
-    // Get images from a specific collection
-    const conditions = [
-      eq(imageCollections.collectionId, params.collectionId),
-      isNull(images.deletedAt),
-    ];
 
-    if (cursor) {
-      conditions.push(lt(images.id, cursor));
-    }
+  // Get all images (processed only)
+  const conditions = [isVisibleImage()];
 
-    query = db
-      .select({
-        id: images.id,
-        uuid: images.uuid,
-        filename: images.filename,
-        originalName: images.originalName,
-        filePath: images.filePath,
-        thumbnailPath: images.thumbnailPath,
-        fileSize: images.fileSize,
-        format: images.format,
-        width: images.width,
-        height: images.height,
-        hash: images.hash,
-        mimeType: images.mimeType,
-        isCorrupted: images.isCorrupted,
-        createdAt: images.createdAt,
-        updatedAt: images.updatedAt,
-        addedToCollectionAt: imageCollections.addedAt,
-      })
-      .from(imageCollections)
-      .innerJoin(images, eq(imageCollections.imageId, images.id))
-      .where(and(...conditions))
-      .orderBy(orderFn(sortColumn))
-      .limit(limit + 1); // Fetch one extra to check if there are more
-  } else {
-    // Get all images
-    const conditions = [isNull(images.deletedAt)];
-
-    if (cursor) {
-      conditions.push(lt(images.id, cursor));
-    }
-
-    query = db
-      .select({
-        id: images.id,
-        uuid: images.uuid,
-        filename: images.filename,
-        originalName: images.originalName,
-        filePath: images.filePath,
-        thumbnailPath: images.thumbnailPath,
-        fileSize: images.fileSize,
-        format: images.format,
-        width: images.width,
-        height: images.height,
-        hash: images.hash,
-        mimeType: images.mimeType,
-        isCorrupted: images.isCorrupted,
-        createdAt: images.createdAt,
-        updatedAt: images.updatedAt,
-      })
-      .from(images)
-      .where(and(...conditions))
-      .orderBy(orderFn(sortColumn))
-      .limit(limit + 1);
+  if (cursor) {
+    conditions.push(lt(images.id, cursor));
   }
+
+  query = db
+    .select({
+      id: images.id,
+      uuid: images.uuid,
+      filename: images.filename,
+      fileSize: images.fileSize,
+      format: images.format,
+      width: images.width,
+      height: images.height,
+      hash: images.hash,
+      mimeType: images.mimeType,
+      isCorrupted: images.isCorrupted,
+      createdAt: images.createdAt,
+      updatedAt: images.updatedAt,
+    })
+    .from(images)
+    .where(and(...conditions))
+    .orderBy(orderFn(sortColumn))
+    .limit(limit + 1);
+
 
   const results = await query;
 
@@ -172,21 +142,13 @@ export async function getPaginatedImagesWithExif(params: PaginationParams): Prom
   const sortColumn = getSortColumn(params.sortBy);
   const orderFn = getOrderFunction(params.sortOrder);
 
-  const conditions = [isNull(images.deletedAt)];
+  const conditions = [isVisibleImage()];
 
   if (cursor) {
     conditions.push(lt(images.id, cursor));
   }
 
-  if (params.collectionId) {
-    // For collection filtering with EXIF, we need a subquery
-    const subquery = db
-      .select({ imageId: imageCollections.imageId })
-      .from(imageCollections)
-      .where(eq(imageCollections.collectionId, params.collectionId));
 
-    conditions.push(sql`${images.id} IN ${subquery}`);
-  }
 
   const results = await db.query.images.findMany({
     where: and(...conditions),
@@ -226,57 +188,15 @@ export async function getPagePaginatedImages(params: PagePaginationParams): Prom
   let dataQuery;
   let countQuery;
 
-  if (params.collectionId) {
-    // Get images from a specific collection
-    const conditions = [
-      eq(imageCollections.collectionId, params.collectionId),
-      isNull(images.deletedAt),
-    ];
+
+    // Get all images (processed only)
+    const conditions = [isVisibleImage()];
 
     dataQuery = db
       .select({
         id: images.id,
         uuid: images.uuid,
         filename: images.filename,
-        originalName: images.originalName,
-        filePath: images.filePath,
-        thumbnailPath: images.thumbnailPath,
-        fileSize: images.fileSize,
-        format: images.format,
-        width: images.width,
-        height: images.height,
-        hash: images.hash,
-        mimeType: images.mimeType,
-        isCorrupted: images.isCorrupted,
-        createdAt: images.createdAt,
-        updatedAt: images.updatedAt,
-        addedToCollectionAt: imageCollections.addedAt,
-      })
-      .from(imageCollections)
-      .innerJoin(images, eq(imageCollections.imageId, images.id))
-      .where(and(...conditions))
-      .orderBy(orderFn(sortColumn))
-      .limit(pageSize)
-      .offset(offset);
-
-    // Count total items in collection
-    countQuery = db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(imageCollections)
-      .innerJoin(images, eq(imageCollections.imageId, images.id))
-      .where(and(...conditions));
-  } else {
-    // Get all images
-    const conditions = [isNull(images.deletedAt)];
-
-    dataQuery = db
-      .select({
-        id: images.id,
-        uuid: images.uuid,
-        filename: images.filename,
-        originalName: images.originalName,
-        filePath: images.filePath,
-        thumbnailPath: images.thumbnailPath,
         fileSize: images.fileSize,
         format: images.format,
         width: images.width,
@@ -298,7 +218,7 @@ export async function getPagePaginatedImages(params: PagePaginationParams): Prom
       .select({ count: sql<number>`count(*)::int` })
       .from(images)
       .where(and(...conditions));
-  }
+  
 
   const [data, countResult] = await Promise.all([
     dataQuery,
@@ -332,16 +252,9 @@ export async function getPagePaginatedImagesWithExif(params: PagePaginationParam
   const sortColumn = getSortColumn(params.sortBy);
   const orderFn = getOrderFunction(params.sortOrder);
 
-  const conditions = [isNull(images.deletedAt)];
+  const conditions = [isVisibleImage()];
 
-  if (params.collectionId) {
-    const subquery = db
-      .select({ imageId: imageCollections.imageId })
-      .from(imageCollections)
-      .where(eq(imageCollections.collectionId, params.collectionId));
 
-    conditions.push(sql`${images.id} IN ${subquery}`);
-  }
 
   // Get data
   const data = await db.query.images.findMany({

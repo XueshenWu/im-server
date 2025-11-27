@@ -1,19 +1,27 @@
 import { eq, desc, sql, and, isNull, inArray } from 'drizzle-orm';
 import { db } from './index';
-import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyncLog } from './schema';
+import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyncLog, Image } from './schema';
 
 // ============================================================
 // IMAGE QUERIES
 // ============================================================
 
 /**
- * Get all images (non-deleted)
+ * Helper: Filter for visible images (not deleted, status = 'processed')
+ */
+const isVisibleImage = () => and(
+  isNull(images.deletedAt),
+  eq(images.status, 'processed')
+);
+
+/**
+ * Get all images (non-deleted, processed only)
  */
 export async function getAllImages() {
   return await db
     .select()
     .from(images)
-    .where(isNull(images.deletedAt))
+    .where(isVisibleImage())
     .orderBy(desc(images.createdAt));
 }
 
@@ -26,7 +34,7 @@ export async function getImagesSince(sinceDate: Date) {
     .from(images)
     .where(
       and(
-        isNull(images.deletedAt),
+        isVisibleImage(),
         sql`${images.updatedAt} > ${sinceDate}`
       )
     )
@@ -55,14 +63,14 @@ export async function getImagesSinceSequence(sinceSequence: number) {
     return [];
   }
 
-  // Fetch the actual images (exclude deleted ones)
+  // Fetch the actual images (exclude deleted and non-processed ones)
   return await db
     .select()
     .from(images)
     .where(
       and(
         inArray(images.id, imageIds),
-        isNull(images.deletedAt)
+        isVisibleImage()
       )
     )
     .orderBy(desc(images.updatedAt));
@@ -76,7 +84,7 @@ export async function getImagesWithExif() {
     .select()
     .from(images)
     .leftJoin(exifData, eq(images.id, exifData.imageId))
-    .where(isNull(images.deletedAt))
+    .where(isVisibleImage())
     .orderBy(desc(images.createdAt));
 }
 
@@ -87,7 +95,7 @@ export async function getImageById(id: number) {
   const result = await db
     .select()
     .from(images)
-    .where(and(eq(images.id, id), isNull(images.deletedAt)))
+    .where(and(eq(images.id, id), isVisibleImage()))
     .limit(1);
 
   return result[0] || null;
@@ -100,7 +108,7 @@ export async function getImageByUuid(uuid: string) {
   const result = await db
     .select()
     .from(images)
-    .where(and(eq(images.uuid, uuid), isNull(images.deletedAt)))
+    .where(and(eq(images.uuid, uuid), isVisibleImage()))
     .limit(1);
 
   return result[0] || null;
@@ -115,7 +123,7 @@ export async function getImagesByUuids(uuids: string[]) {
   return await db
     .select()
     .from(images)
-    .where(and(inArray(images.uuid, uuids), isNull(images.deletedAt)))
+    .where(and(inArray(images.uuid, uuids), isVisibleImage()))
     .orderBy(desc(images.createdAt));
 }
 
@@ -129,7 +137,7 @@ export async function getImagesWithExifByUuids(uuids: string[]) {
     .select()
     .from(images)
     .leftJoin(exifData, eq(images.id, exifData.imageId))
-    .where(and(inArray(images.uuid, uuids), isNull(images.deletedAt)))
+    .where(and(inArray(images.uuid, uuids), isVisibleImage()))
     .orderBy(desc(images.createdAt));
 }
 
@@ -140,7 +148,7 @@ export async function getImageByHash(hash: string) {
   const result = await db
     .select()
     .from(images)
-    .where(and(eq(images.hash, hash), isNull(images.deletedAt)))
+    .where(and(eq(images.hash, hash), isVisibleImage()))
     .limit(1);
 
   return result[0] || null;
@@ -432,6 +440,35 @@ export async function createImageWithExif(
   };
 }
 
+
+
+export async function insertPendingImages(newImages:NewImage[]){
+    // Check for existing images by UUID
+    const uuids = newImages.map(img => img.uuid).filter((uuid): uuid is string => uuid !== null && uuid !== undefined);
+
+    if (uuids.length > 0) {
+        const existingImages = await db
+            .select({ uuid: images.uuid })
+            .from(images)
+            .where(and(
+                inArray(images.uuid, uuids),
+                isNull(images.deletedAt)
+            ));
+
+        if (existingImages.length > 0) {
+            const existingUuids = existingImages.map(img => img.uuid);
+            throw new Error(`Images with the following UUIDs already exist: ${existingUuids.join(', ')}`);
+        }
+    }
+
+    await db.insert(images).values(newImages.map(newImage=>({status:'pending',
+        createdAt:new Date(),
+        updatedAt:new Date(),
+      ...newImage} as NewImage))).returning();
+}
+
+
+
 /**
  * Replace image by UUID (preserves UUID, ID, createdAt, collections)
  * Updates file metadata and optionally EXIF data
@@ -448,11 +485,21 @@ export async function replaceImageByUuid(
   }
 
   // Update image metadata (preserve UUID, ID, createdAt)
+  // Remove fields that shouldn't be in imageData or need special handling
+  const { status, updatedAt, deletedAt, ...cleanImageData } = imageData;
+  console.log('clean data: ', JSON.stringify({
+      ...cleanImageData,
+      updatedAt: new Date(),
+      status: 'pending',
+      deletedAt: null,
+    }))
   const updatedImage = await db
     .update(images)
     .set({
-      ...imageData,
+      ...cleanImageData,
       updatedAt: new Date(),
+      status: 'pending',
+      deletedAt: null,
     })
     .where(eq(images.uuid, uuid))
     .returning();

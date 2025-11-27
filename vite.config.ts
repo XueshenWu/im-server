@@ -3,7 +3,7 @@ import { VitePluginNode } from 'vite-plugin-node';
 
 export default defineConfig({
   server: {
-    port: 9999,
+    port: 3000,
     // proxy:{
     //  '/api': {
     //     target: 'http://10.255.255.254:3000',
