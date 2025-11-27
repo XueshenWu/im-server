@@ -98,33 +98,9 @@ export async function generateThumbnail(
  */
 
 
-// Define the interface so TypeScript doesn't complain
-export interface ExifMetadata {
-  cameraMake?: string;
-  cameraModel?: string;
-  lensModel?: string;
-  iso?: number;
-  shutterSpeed?: string;
-  aperture?: string;
-  focalLength?: string;
-  dateTaken?: Date;
-  gpsLatitude?: string;
-  gpsLongitude?: string;
-  gpsAltitude?: string;
-  orientation?: string;
-  metadata: {
-    software?: string;
-    copyright?: string;
-    artist?: string;
-    whiteBalance?: string;
-    flash?: string;
-    exposureMode?: string;
-    meteringMode?: string;
-    colorSpace?: string;
-  };
-}
+import { NewExifData } from '../db/schema';
 
-export async function extractExifData(filePath: string): Promise<ExifMetadata | null> {
+export async function extractExifData(filePath: string): Promise<Omit<NewExifData, 'id' | 'uuid'> | null> {
   try {
     // Note: If running in Electron Renderer without Node Integration, 
     // you might need to pass a Blob/File object instead of a filePath string.
@@ -183,24 +159,34 @@ export async function extractExifData(filePath: string): Promise<ExifMetadata | 
       }
     }
 
+    // Parse orientation to number (EXIF orientation is 1-8)
+    let orientation: number | null = null;
+    if (exif.Orientation) {
+      const orientationNum = typeof exif.Orientation === 'number'
+        ? exif.Orientation
+        : parseInt(String(exif.Orientation), 10);
+      orientation = isNaN(orientationNum) ? null : orientationNum;
+    }
+
     return {
-      cameraMake: exif.Make,
-      cameraModel: exif.Model,
-      lensModel: exif.LensModel,
-      iso: exif.ISO,
-      shutterSpeed,
-      aperture,
-      focalLength: exif.FocalLength ? `${exif.FocalLength}mm` : undefined,
-      dateTaken,
+      cameraMake: exif.Make || null,
+      cameraModel: exif.Model || null,
+      lensModel: exif.LensModel || null,
+      artist: exif.Artist || null,
+      copyright: exif.Copyright || null,
+      software: exif.Software || null,
+      iso: exif.ISO || null,
+      shutterSpeed: shutterSpeed || null,
+      aperture: aperture || null,
+      focalLength: exif.FocalLength ? `${exif.FocalLength}mm` : null,
+      dateTaken: dateTaken || null,
+      orientation,
       // exifr usually returns numbers for GPS; safeguard with optional chaining
-      gpsLatitude: exif.latitude?.toString(),
-      gpsLongitude: exif.longitude?.toString(),
-      gpsAltitude: exif.altitude?.toString(),
-      orientation: exif.Orientation,
-      metadata: {
-        software: exif.Software,
-        copyright: exif.Copyright,
-        artist: exif.Artist,
+      gpsLatitude: exif.latitude?.toString() || null,
+      gpsLongitude: exif.longitude?.toString() || null,
+      gpsAltitude: exif.altitude?.toString() || null,
+      // Extra metadata in JSONB field
+      extra: {
         whiteBalance: exif.WhiteBalance,
         flash: exif.Flash,
         exposureMode: exif.ExposureMode,

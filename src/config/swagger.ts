@@ -55,6 +55,17 @@ const options: Options = {
             deletedAt: { type: 'string', format: 'date-time', nullable: true },
           },
         },
+        ImageWithExif: {
+          allOf: [
+            { $ref: '#/components/schemas/Image' },
+            {
+              type: 'object',
+              properties: {
+                exifData: { $ref: '#/components/schemas/ExifData' },
+              },
+            },
+          ],
+        },
         ExifData: {
           type: 'object',
           properties: {
@@ -84,6 +95,90 @@ const options: Options = {
             jpgCount: { type: 'integer', example: 50 },
             pngCount: { type: 'integer', example: 30 },
             tifCount: { type: 'integer', example: 20 },
+          },
+        },
+        OperationStats: {
+          type: 'object',
+          properties: {
+            requested: { type: 'integer', description: 'Number of items requested', example: 10 },
+            successful: { type: 'integer', description: 'Number of successful operations', example: 9 },
+            failed: { type: 'integer', description: 'Number of failed operations', example: 1 },
+          },
+        },
+        OperationError: {
+          type: 'object',
+          properties: {
+            uuid: { type: 'string', format: 'uuid' },
+            error: { type: 'string', example: 'Image not found' },
+          },
+        },
+        UploadUrls: {
+          type: 'object',
+          properties: {
+            imageUrl: { type: 'string', format: 'uri', example: 'https://storage.example.com/...' },
+            thumbnailUrl: { type: 'string', format: 'uri', example: 'https://storage.example.com/...' },
+            expiresIn: { type: 'integer', description: 'URL expiry time in seconds', example: 900 },
+          },
+        },
+        ReplaceResult: {
+          type: 'object',
+          properties: {
+            image: { $ref: '#/components/schemas/Image' },
+            uploadUrls: { $ref: '#/components/schemas/UploadUrls' },
+          },
+        },
+        DownloadInfo: {
+          type: 'object',
+          properties: {
+            uuid: { type: 'string', format: 'uuid' },
+            filename: { type: 'string', example: 'photo.jpg' },
+            downloadUrl: { type: 'string', format: 'uri', example: 'https://storage.example.com/...' },
+            expiresIn: { type: 'integer', description: 'URL expiry time in seconds', example: 3600 },
+            metadata: {
+              type: 'object',
+              properties: {
+                id: { type: 'integer' },
+                format: { type: 'string' },
+                fileSize: { type: 'integer' },
+                width: { type: 'integer' },
+                height: { type: 'integer' },
+                hash: { type: 'string' },
+                mimeType: { type: 'string' },
+                isCorrupted: { type: 'boolean' },
+                createdAt: { type: 'string', format: 'date-time' },
+                updatedAt: { type: 'string', format: 'date-time' },
+              },
+            },
+            exifData: {
+              nullable: true,
+              oneOf: [
+                { $ref: '#/components/schemas/ExifData' },
+                { type: 'null' }
+              ]
+            },
+          },
+        },
+        HealthStatus: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['ok', 'degraded'], example: 'ok' },
+            timestamp: { type: 'string', format: 'date-time' },
+            services: {
+              type: 'object',
+              properties: {
+                postgresql: { $ref: '#/components/schemas/ServiceHealth' },
+                redis: { $ref: '#/components/schemas/ServiceHealth' },
+                minio: { $ref: '#/components/schemas/ServiceHealth' },
+              },
+            },
+          },
+        },
+        ServiceHealth: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['connected', 'disconnected', 'unknown'], example: 'connected' },
+            responseTime: { type: 'number', description: 'Response time in milliseconds', example: 5 },
+            error: { type: 'string', description: 'Error message if disconnected' },
           },
         },
         Error: {

@@ -1,5 +1,5 @@
 import * as Minio from 'minio';
-import { Readable } from 'stream';
+
 
 const minioClient = new Minio.Client({
     endPoint: process.env.MINIO_ENDPOINT || 'localhost',

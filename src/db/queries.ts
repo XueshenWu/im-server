@@ -1,6 +1,6 @@
 import { eq, desc, sql, and, isNull, inArray } from 'drizzle-orm';
 import { db } from './index';
-import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyncLog, Image } from './schema';
+import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyncLog, Image, NewImageWithExif } from './schema';
 
 // ============================================================
 // IMAGE QUERIES
@@ -11,7 +11,7 @@ import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyn
  */
 const isVisibleImage = () => and(
   isNull(images.deletedAt),
-  eq(images.status, 'processed')
+  eq(images.status, 'processed'),
 );
 
 /**
@@ -83,7 +83,7 @@ export async function getImagesWithExif() {
   return await db
     .select()
     .from(images)
-    .leftJoin(exifData, eq(images.id, exifData.imageId))
+    .leftJoin(exifData, eq(images.uuid, exifData.uuid))
     .where(isVisibleImage())
     .orderBy(desc(images.createdAt));
 }
@@ -136,7 +136,7 @@ export async function getImagesWithExifByUuids(uuids: string[]) {
   return await db
     .select()
     .from(images)
-    .leftJoin(exifData, eq(images.id, exifData.imageId))
+    .leftJoin(exifData, eq(images.uuid, exifData.uuid))
     .where(and(inArray(images.uuid, uuids), isVisibleImage()))
     .orderBy(desc(images.createdAt));
 }
@@ -291,11 +291,11 @@ export async function getImageStats() {
 /**
  * Get EXIF data for an image
  */
-export async function getExifByImageId(imageId: number) {
+export async function getExifByImageUUID(uuid: string) {
   const result = await db
     .select()
     .from(exifData)
-    .where(eq(exifData.imageId, imageId))
+    .where(eq(exifData.uuid, uuid))
     .limit(1);
 
   return result[0] || null;
@@ -316,12 +316,23 @@ export async function createExifData(exif: NewExifData) {
 /**
  * Update EXIF data
  */
-export async function updateExifData(imageId: number, exif: Partial<NewExifData>) {
+export async function updateExifData(uuid: string, exif: Partial<NewExifData>) {
   const result = await db
     .update(exifData)
-    .set({ ...exif, updatedAt: new Date() })
-    .where(eq(exifData.imageId, imageId))
+    .set({ ...exif })
+    .where(eq(exifData.uuid, uuid))
     .returning();
+
+  const updatedExif = result[0];
+  if (!updatedExif) return null;
+  
+  await db
+  .update(images)
+  .set({
+      updatedAt: new Date(),
+    })
+  .where(eq(images.uuid, uuid))
+  
 
   return result[0] || null;
 }
@@ -329,10 +340,10 @@ export async function updateExifData(imageId: number, exif: Partial<NewExifData>
 /**
  * Delete EXIF data
  */
-export async function deleteExifData(imageId: number) {
+export async function deleteExifData(uuid: string) {
   await db
     .delete(exifData)
-    .where(eq(exifData.imageId, imageId));
+    .where(eq(exifData.uuid, uuid));
 }
 
 // ============================================================
@@ -401,11 +412,11 @@ export async function getSyncLogsByStatus(status: string) {
 /**
  * Get image with EXIF data by ID
  */
-export async function getImageWithExif(id: number) {
-  const image = await getImageById(id);
+export async function getImageWithExif(uuid: string) {
+  const image = await getImageByUuid(uuid);
   if (!image) return null;
 
-  const exif = await getExifByImageId(id);
+  const exif = await getExifByImageUUID(uuid);
 
   return {
     ...image,
@@ -418,14 +429,14 @@ export async function getImageWithExif(id: number) {
  */
 export async function createImageWithExif(
   imageData: NewImage,
-  exifDataInput?: Omit<NewExifData, 'imageId'>
+  exifDataInput?: Omit<NewExifData, 'id' | 'uuid'>
 ) {
   const newImage = await createImage(imageData);
 
   if (exifDataInput) {
     const exif = await createExifData({
       ...exifDataInput,
-      imageId: newImage.id,
+      uuid: newImage.uuid,
     });
 
     return {
@@ -442,7 +453,7 @@ export async function createImageWithExif(
 
 
 
-export async function insertPendingImages(newImages:NewImage[]){
+export async function insertPendingImages(newImages:NewImageWithExif[]){
     // Check for existing images by UUID
     const uuids = newImages.map(img => img.uuid).filter((uuid): uuid is string => uuid !== null && uuid !== undefined);
 
@@ -461,10 +472,28 @@ export async function insertPendingImages(newImages:NewImage[]){
         }
     }
 
-    await db.insert(images).values(newImages.map(newImage=>({status:'pending',
-        createdAt:new Date(),
-        updatedAt:new Date(),
-      ...newImage} as NewImage))).returning();
+    // Insert images
+    await db.insert(images).values(newImages.map(newImage => {
+        const { exifData, ...imageData } = newImage;
+        return {
+            status: 'pending',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            ...imageData
+        } as NewImage;
+    }));
+
+    // Insert EXIF data for images that have it
+    const exifRecords = newImages
+        .filter(img => img.exifData && img.uuid)
+        .map(img => ({
+            uuid: img.uuid!,
+            ...img.exifData
+        } as NewExifData));
+
+    if (exifRecords.length > 0) {
+        await db.insert(exifData).values(exifRecords);
+    }
 }
 
 
@@ -476,7 +505,7 @@ export async function insertPendingImages(newImages:NewImage[]){
 export async function replaceImageByUuid(
   uuid: string,
   imageData: Partial<NewImage>,
-  exifDataInput?: Omit<NewExifData, 'imageId'>
+  exifDataInput?: Omit<NewExifData, 'id' | 'uuid'>
 ) {
   // Get existing image
   const existingImage = await getImageByUuid(uuid);
@@ -506,11 +535,11 @@ export async function replaceImageByUuid(
 
   // Handle EXIF data
   if (exifDataInput) {
-    const existingExif = await getExifByImageId(existingImage.id);
+    const existingExif = await getExifByImageUUID(existingImage.uuid);
 
     if (existingExif) {
       // Update existing EXIF data
-      const updatedExif = await updateExifData(existingImage.id, exifDataInput);
+      const updatedExif = await updateExifData(existingImage.uuid, exifDataInput);
       return {
         ...updatedImage[0],
         exifData: updatedExif,
@@ -519,7 +548,7 @@ export async function replaceImageByUuid(
       // Create new EXIF data
       const newExif = await createExifData({
         ...exifDataInput,
-        imageId: existingImage.id,
+        uuid: existingImage.uuid,
       });
       return {
         ...updatedImage[0],
@@ -528,7 +557,7 @@ export async function replaceImageByUuid(
     }
   } else {
     // Delete EXIF data if it exists (new image has no EXIF)
-    await deleteExifData(existingImage.id);
+    await deleteExifData(existingImage.uuid);
   }
 
   return {

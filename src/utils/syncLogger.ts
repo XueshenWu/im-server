@@ -13,12 +13,15 @@ export type SyncOperation =
   | 'upload'
   | 'download'
   | 'update'
+  | 'update_exif'
   | 'delete'
   | 'replace'
   | 'conflict'
   | 'batch_upload'
   | 'batch_delete'
-  | 'batch_update';
+  | 'batch_update'
+  | 'batch_update_exif'
+  | 'batch_replace';
 
 /**
  * Status types for sync operations
@@ -191,7 +194,7 @@ export async function getSyncOperationsByClient(
  * Returns the parent operation ID that should be used for child operations
  */
 export async function createBatchOperation(params: {
-  operation: 'batch_upload' | 'batch_delete' | 'batch_update';
+  operation: 'batch_upload' | 'batch_delete' | 'batch_update' | 'batch_update_exif' | 'batch_replace';
   clientId?: string;
   totalCount: number;
   metadata?: SyncLogMetadata;

@@ -1,10 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { imagesController } from '../controllers/images.controller';
-// import { chunkedUploadController } from '../controllers/chunkedUpload.controller';
 import { purgeController } from '../controllers/purge.controller';
 import { asyncHandler } from '../middleware/errorHandler';
-import { upload } from '../middleware/upload';
-import { chunkUpload } from '../middleware/chunkUpload';
 import { validateSync } from '../middleware/syncValidation';
 
 
@@ -39,6 +36,12 @@ const router = Router();
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/Image'
+ *       400:
+ *         description: Invalid parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
   if (req.query.withExif === 'true') {
@@ -121,6 +124,10 @@ router.get('/', asyncHandler(async (req: Request, res: Response) => {
  *                       description: Items per page
  *       400:
  *         description: Invalid parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.get('/paginated', validateSync, asyncHandler(imagesController.getPaginated));
 
@@ -209,6 +216,10 @@ router.get('/paginated', validateSync, asyncHandler(imagesController.getPaginate
  *                       description: Whether there is a previous page
  *       400:
  *         description: Invalid parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.get('/page', validateSync, asyncHandler(imagesController.getPagePaginated));
 
@@ -251,6 +262,12 @@ router.get('/page', validateSync, asyncHandler(imagesController.getPagePaginated
  *                         type: string
  *                       fileSize:
  *                         type: integer
+ *       400:
+ *         description: Invalid parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.get('/metadata', validateSync, asyncHandler(imagesController.getMetadata));
 
@@ -275,81 +292,7 @@ router.get('/metadata', validateSync, asyncHandler(imagesController.getMetadata)
  */
 router.get('/stats', validateSync, asyncHandler(imagesController.getStats));
 
-/**
- * @swagger
- * /api/images/file/{id}:
- *   get:
- *     summary: Get image file by ID with optional metadata
- *     tags: [Images]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: Image ID
- *       - in: query
- *         name: info
- *         schema:
- *           type: boolean
- *         description: Include image metadata in response headers (X-Image-*)
- *     responses:
- *       200:
- *         description: Image file
- *         headers:
- *           X-Image-Id:
- *             schema:
- *               type: integer
- *             description: Image ID (when info=true)
- *           X-Image-UUID:
- *             schema:
- *               type: string
- *             description: Image UUID (when info=true)
- *           X-Image-Filename:
- *             schema:
- *               type: string
- *             description: Image filename (when info=true)
- *           X-Image-Original-Name:
- *             schema:
- *               type: string
- *             description: Original filename (when info=true)
- *           X-Image-Format:
- *             schema:
- *               type: string
- *             description: Image format (when info=true)
- *           X-Image-File-Size:
- *             schema:
- *               type: integer
- *             description: File size in bytes (when info=true)
- *           X-Image-Width:
- *             schema:
- *               type: integer
- *             description: Image width (when info=true)
- *           X-Image-Height:
- *             schema:
- *               type: integer
- *             description: Image height (when info=true)
- *           X-Image-Hash:
- *             schema:
- *               type: string
- *             description: SHA-256 hash (when info=true)
- *           X-Image-Created-At:
- *             schema:
- *               type: string
- *             description: Creation timestamp (when info=true)
- *           X-Image-Updated-At:
- *             schema:
- *               type: string
- *             description: Update timestamp (when info=true)
- *         content:
- *           image/*:
- *             schema:
- *               type: string
- *               format: binary
- *       404:
- *         description: Image not found
- */
-router.get('/file/:id', asyncHandler(imagesController.getFileById));
+
 
 /**
  * @swagger
@@ -421,69 +364,14 @@ router.get('/file/:id', asyncHandler(imagesController.getFileById));
  *               format: binary
  *       404:
  *         description: Image not found
- */
-router.get('/file/uuid/:uuid', asyncHandler(imagesController.getFileByUuid));
-
-/**
- * @swagger
- * /api/images/thumbnail/uuid/{uuid}:
- *   get:
- *     summary: Get thumbnail image by UUID
- *     tags: [Images]
- *     parameters:
- *       - in: path
- *         name: uuid
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Image UUID
- *     responses:
- *       200:
- *         description: Thumbnail file
- *         content:
- *           image/jpeg:
- *             schema:
- *               type: string
- *               format: binary
- *       404:
- *         description: Image or thumbnail not found
- */
-router.get('/thumbnail/uuid/:uuid', asyncHandler(imagesController.getThumbnailByUuid));
-
-/**
- * @swagger
- * /api/images/{id}:
- *   get:
- *     summary: Get image by ID
- *     tags: [Images]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: Image ID
- *     responses:
- *       200:
- *         description: Image details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/Image'
- *       404:
- *         description: Image not found
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.get('/:id', validateSync, asyncHandler(imagesController.getById));
+router.get('/file/uuid/:uuid', asyncHandler(imagesController.getFileByUuid));
+
+
 
 /**
  * @swagger
@@ -513,23 +401,20 @@ router.get('/:id', validateSync, asyncHandler(imagesController.getById));
  *                   $ref: '#/components/schemas/Image'
  *       404:
  *         description: Image not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.get('/uuid/:uuid', validateSync, asyncHandler(imagesController.getByUuid));
 
 /**
  * @swagger
- * /api/images/uuid/{uuid}/replace:
- *   put:
- *     summary: Replace image by UUID - Update metadata and get presigned URLs
+ * /api/images/replace:
+ *   patch:
+ *     summary: Replace images (single or batch) - Update metadata and get presigned URLs
  *     tags: [Images]
- *     parameters:
- *       - in: path
- *         name: uuid
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Image UUID
+ *     description: Unified endpoint for replacing images. If array length is 1, treats as single operation. If > 1, creates batch operation log.
  *     requestBody:
  *       required: true
  *       content:
@@ -537,267 +422,61 @@ router.get('/uuid/:uuid', validateSync, asyncHandler(imagesController.getByUuid)
  *           schema:
  *             type: object
  *             required:
- *               - filename
- *               - format
- *               - mimeType
+ *               - replacements
  *             properties:
- *               filename:
- *                 type: string
- *                 description: New filename
- *               format:
- *                 type: string
- *                 description: File format (jpg, png, etc.)
- *               mimeType:
- *                 type: string
- *                 description: MIME type (image/jpeg, image/png, etc.)
- *               width:
- *                 type: integer
- *                 description: Image width
- *               height:
- *                 type: integer
- *                 description: Image height
- *               fileSize:
- *                 type: integer
- *                 description: File size in bytes
- *               hash:
- *                 type: string
- *                 description: SHA-256 hash
- *     responses:
- *       200:
- *         description: Metadata updated, presigned URLs generated
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *                 data:
- *                   type: object
- *                   properties:
- *                     image:
- *                       $ref: '#/components/schemas/Image'
- *                     uploadUrls:
- *                       type: object
- *                       properties:
- *                         imageUrl:
- *                           type: string
- *                         thumbnailUrl:
- *                           type: string
- *                         expiresIn:
- *                           type: integer
- *       404:
- *         description: Image not found
- */
-router.put('/uuid/:uuid/replace', validateSync, asyncHandler(imagesController.replaceImage));
-
-/**
- * @swagger
- * /api/images/uuid/{uuid}/replace/chunked/init:
- *   post:
- *     summary: Initialize chunked image replacement session
- *     tags: [Image Replacement]
- *     parameters:
- *       - in: path
- *         name: uuid
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Image UUID to replace
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - filename
- *               - totalSize
- *               - chunkSize
- *               - totalChunks
- *             properties:
- *               filename:
- *                 type: string
- *                 description: Original filename
- *               totalSize:
- *                 type: integer
- *                 description: Total file size in bytes
- *               chunkSize:
- *                 type: integer
- *                 description: Size of each chunk in bytes
- *               totalChunks:
- *                 type: integer
- *                 description: Total number of chunks
- *               mimeType:
- *                 type: string
- *                 description: MIME type of the file
- *     responses:
- *       201:
- *         description: Replacement session created
- *       404:
- *         description: Image not found
- */
-// router.post('/uuid/:uuid/replace/chunked/init', validateSync, asyncHandler(chunkedUploadController.initReplaceUpload));
-
-/**
- * @swagger
- * /api/images/uuid/{uuid}/replace/chunked/upload/{sessionId}:
- *   post:
- *     summary: Upload chunk for image replacement
- *     tags: [Image Replacement]
- *     parameters:
- *       - in: path
- *         name: uuid
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *       - in: path
- *         name: sessionId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             required:
- *               - chunk
- *               - chunkNumber
- *             properties:
- *               chunk:
- *                 type: string
- *                 format: binary
- *               chunkNumber:
- *                 type: integer
- *     responses:
- *       200:
- *         description: Chunk uploaded successfully
- */
-// router.post('/uuid/:uuid/replace/chunked/upload/:sessionId', chunkUpload.single('chunk'), asyncHandler(chunkedUploadController.uploadChunk));
-
-/**
- * @swagger
- * /api/images/uuid/{uuid}/replace/chunked/complete/{sessionId}:
- *   post:
- *     summary: Complete chunked image replacement
- *     tags: [Image Replacement]
- *     parameters:
- *       - in: path
- *         name: uuid
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *       - in: path
- *         name: sessionId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *     responses:
- *       200:
- *         description: Image replaced successfully
- *       404:
- *         description: Image or session not found
- */
-// router.post('/uuid/:uuid/replace/chunked/complete/:sessionId', validateSync, asyncHandler(chunkedUploadController.completeReplaceUpload));
-
-/**
- * @swagger
- * /api/images/{id}:
- *   put:
- *     summary: Update image metadata
- *     tags: [Images]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               filename:
- *                 type: string
- *               originalName:
- *                 type: string
- *     responses:
- *       200:
- *         description: Image updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/Image'
- */
-router.put('/:id', validateSync, asyncHandler(imagesController.update));
-
-/**
- * @swagger
- * /api/images/{id}:
- *   delete:
- *     summary: Delete image (soft delete)
- *     tags: [Images]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Image deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- */
-router.delete('/:id', validateSync, asyncHandler(imagesController.delete));
-
-/**
- * @swagger
- * /api/images/batch/delete/ids:
- *   post:
- *     summary: Batch soft delete images by IDs
- *     tags: [Images]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - ids
- *             properties:
- *               ids:
+ *               replacements:
  *                 type: array
  *                 items:
- *                   type: integer
- *                 description: Array of image IDs to soft delete
- *                 example: [1, 2, 3, 4, 5]
+ *                   type: object
+ *                   required:
+ *                     - uuid
+ *                     - filename
+ *                     - format
+ *                     - mimeType
+ *                   properties:
+ *                     uuid:
+ *                       type: string
+ *                       format: uuid
+ *                       description: Image UUID
+ *                     filename:
+ *                       type: string
+ *                       description: New filename
+ *                     format:
+ *                       type: string
+ *                       description: File format (jpg, png, etc.)
+ *                     mimeType:
+ *                       type: string
+ *                       description: MIME type (image/jpeg, image/png, etc.)
+ *                     width:
+ *                       type: integer
+ *                       description: Image width
+ *                     height:
+ *                       type: integer
+ *                       description: Image height
+ *                     fileSize:
+ *                       type: integer
+ *                       description: File size in bytes
+ *                     hash:
+ *                       type: string
+ *                       description: SHA-256 hash
+ *                     exifData:
+ *                       $ref: '#/components/schemas/ExifData'
+ *                 description: Array of image replacements. Length 1 = single op, > 1 = batch op
+ *                 example:
+ *                   - uuid: "867130af-dbc1-40cd-99f2-fb75baf9b8e1"
+ *                     filename: "new-image.jpg"
+ *                     format: "jpg"
+ *                     mimeType: "image/jpeg"
+ *                     width: 1920
+ *                     height: 1080
+ *                     fileSize: 524288
+ *                     hash: "abc123..."
+ *                     exifData:
+ *                       latitude: 37.7749
+ *                       longitude: -122.4194
  *     responses:
  *       200:
- *         description: Images soft deleted successfully
+ *         description: Images replaced successfully
  *         content:
  *           application/json:
  *             schema:
@@ -810,33 +489,38 @@ router.delete('/:id', validateSync, asyncHandler(imagesController.delete));
  *                 data:
  *                   type: object
  *                   properties:
- *                     deleted:
+ *                     replaced:
  *                       type: array
  *                       items:
- *                         $ref: '#/components/schemas/Image'
+ *                         $ref: '#/components/schemas/ReplaceResult'
  *                     stats:
- *                       type: object
- *                       properties:
- *                         requested:
- *                           type: integer
- *                           description: Number of IDs requested
- *                         successful:
- *                           type: integer
- *                           description: Number of images successfully deleted
- *                         failed:
- *                           type: integer
- *                           description: Number of images that failed to delete
+ *                       $ref: '#/components/schemas/OperationStats'
+ *                     errors:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/OperationError'
  *       400:
  *         description: Invalid request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-router.post('/batch/delete/ids', validateSync, asyncHandler(imagesController.batchDeleteByIds));
+router.patch('/replace', validateSync, asyncHandler(imagesController.replaceImages));
+
+
+
+
+
+
 
 /**
  * @swagger
- * /api/images/batch/update:
- *   put:
- *     summary: Batch update image metadata by UUIDs
+ * /api/images/update/exif:
+ *   patch:
+ *     summary: Update EXIF data (single or batch) - Unified endpoint
  *     tags: [Images]
+ *     description: Unified endpoint for updating EXIF data. If array length is 1, treats as single operation. If > 1, creates batch operation log.
  *     requestBody:
  *       required: true
  *       content:
@@ -852,23 +536,28 @@ router.post('/batch/delete/ids', validateSync, asyncHandler(imagesController.bat
  *                   type: object
  *                   required:
  *                     - uuid
+ *                     - exifData
  *                   properties:
  *                     uuid:
  *                       type: string
  *                       format: uuid
- *                     filename:
- *                       type: string
- *                     originalName:
- *                       type: string
- *                 description: Array of image updates with UUID and fields to update
+ *                       description: Image UUID
+ *                     exifData:
+ *                       $ref: '#/components/schemas/ExifData'
+ *                 description: Array of EXIF updates. Length 1 = single op, > 1 = batch op
  *                 example:
  *                   - uuid: "867130af-dbc1-40cd-99f2-fb75baf9b8e1"
- *                     filename: "new-name.jpg"
+ *                     exifData:
+ *                       latitude: 37.7749
+ *                       longitude: -122.4194
+ *                       cameraMake: "Canon"
  *                   - uuid: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
- *                     originalName: "updated.png"
+ *                     exifData:
+ *                       latitude: 40.7128
+ *                       longitude: -74.0060
  *     responses:
  *       200:
- *         description: Images updated successfully
+ *         description: EXIF data updated successfully
  *         content:
  *           application/json:
  *             schema:
@@ -886,34 +575,27 @@ router.post('/batch/delete/ids', validateSync, asyncHandler(imagesController.bat
  *                       items:
  *                         $ref: '#/components/schemas/Image'
  *                     stats:
- *                       type: object
- *                       properties:
- *                         requested:
- *                           type: integer
- *                         successful:
- *                           type: integer
- *                         failed:
- *                           type: integer
+ *                       $ref: '#/components/schemas/OperationStats'
  *                     errors:
  *                       type: array
  *                       items:
- *                         type: object
- *                         properties:
- *                           uuid:
- *                             type: string
- *                           error:
- *                             type: string
+ *                         $ref: '#/components/schemas/OperationError'
  *       400:
  *         description: Invalid request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-router.put('/batch/update', validateSync, asyncHandler(imagesController.batchUpdate));
+router.patch('/update/exif', validateSync, asyncHandler(imagesController.UpdateExifData));
 
 /**
  * @swagger
- * /api/images/batch/delete/uuids:
- *   post:
- *     summary: Batch soft delete images by UUIDs
+ * /api/images/delete:
+ *   delete:
+ *     summary: Delete images (single or batch) - Unified endpoint
  *     tags: [Images]
+ *     description: Unified endpoint for deleting images. If array length is 1, treats as single operation. If > 1, creates batch operation log.
  *     requestBody:
  *       required: true
  *       content:
@@ -928,7 +610,7 @@ router.put('/batch/update', validateSync, asyncHandler(imagesController.batchUpd
  *                 items:
  *                   type: string
  *                   format: uuid
- *                 description: Array of image UUIDs to soft delete
+ *                 description: Array of image UUIDs to soft delete. Length 1 = single op, > 1 = batch op
  *                 example: ["867130af-dbc1-40cd-99f2-fb75baf9b8e1", "f47ac10b-58cc-4372-a567-0e02b2c3d479"]
  *     responses:
  *       200:
@@ -950,21 +632,19 @@ router.put('/batch/update', validateSync, asyncHandler(imagesController.batchUpd
  *                       items:
  *                         $ref: '#/components/schemas/Image'
  *                     stats:
- *                       type: object
- *                       properties:
- *                         requested:
- *                           type: integer
- *                           description: Number of UUIDs requested
- *                         successful:
- *                           type: integer
- *                           description: Number of images successfully deleted
- *                         failed:
- *                           type: integer
- *                           description: Number of images that failed to delete
+ *                       $ref: '#/components/schemas/OperationStats'
+ *                     errors:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/OperationError'
  *       400:
  *         description: Invalid request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-router.post('/batch/delete/uuids', validateSync, asyncHandler(imagesController.batchDeleteByUuids));
+router.delete('/delete', validateSync, asyncHandler(imagesController.batchDeleteByUuids));
 
 /**
  * @swagger
@@ -1016,314 +696,15 @@ router.post('/batch/delete/uuids', validateSync, asyncHandler(imagesController.b
  *                     $ref: '#/components/schemas/Image'
  *       400:
  *         description: Invalid request body
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.post('/batch/get/uuids', asyncHandler(imagesController.getImagesByUUID));
 
-/**
- * @swagger
- * /api/images/upload:
- *   post:
- *     summary: Upload images
- *     tags: [Images]
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             properties:
- *               images:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: binary
- *     responses:
- *       201:
- *         description: Images uploaded successfully
- *       400:
- *         description: No files uploaded or invalid format
- */
-router.post('/upload', validateSync, upload.array('images', 30), asyncHandler(imagesController.upload));
 
-/**
- * @swagger
- * /api/images/batch:
- *   post:
- *     summary: Batch upload from folder config
- *     tags: [Images]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *     responses:
- *       201:
- *         description: Batch upload completed
- *       501:
- *         description: Not yet implemented
- */
-router.post('/batch', asyncHandler(imagesController.batchUpload));
 
-/**
- * @swagger
- * /api/images/chunked/init:
- *   post:
- *     summary: Initialize a chunked upload session
- *     tags: [Chunked Upload]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - filename
- *               - totalSize
- *               - chunkSize
- *               - totalChunks
- *             properties:
- *               filename:
- *                 type: string
- *                 description: Original filename
- *                 example: large-image.jpg
- *               totalSize:
- *                 type: integer
- *                 description: Total file size in bytes
- *                 example: 52428800
- *               chunkSize:
- *                 type: integer
- *                 description: Size of each chunk in bytes
- *                 example: 5242880
- *               totalChunks:
- *                 type: integer
- *                 description: Total number of chunks
- *                 example: 10
- *               mimeType:
- *                 type: string
- *                 description: MIME type of the file
- *                 example: image/jpeg
- *     responses:
- *       201:
- *         description: Upload session created
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     sessionId:
- *                       type: string
- *                       format: uuid
- *                     filename:
- *                       type: string
- *                     totalChunks:
- *                       type: integer
- *                     chunkSize:
- *                       type: integer
- *                     expiresAt:
- *                       type: string
- *                       format: date-time
- *       400:
- *         description: Invalid request
- */
-// router.post('/chunked/init', validateSync, asyncHandler(chunkedUploadController.initUpload));
-
-/**
- * @swagger
- * /api/images/chunked/upload/{sessionId}:
- *   post:
- *     summary: Upload a single chunk
- *     tags: [Chunked Upload]
- *     parameters:
- *       - in: path
- *         name: sessionId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Upload session ID
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             required:
- *               - chunk
- *               - chunkNumber
- *             properties:
- *               chunk:
- *                 type: string
- *                 format: binary
- *                 description: Chunk data
- *               chunkNumber:
- *                 type: integer
- *                 description: Zero-based chunk index
- *     responses:
- *       200:
- *         description: Chunk uploaded successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *                 data:
- *                   type: object
- *                   properties:
- *                     sessionId:
- *                       type: string
- *                     chunkNumber:
- *                       type: integer
- *                     uploadedChunks:
- *                       type: integer
- *                     totalChunks:
- *                       type: integer
- *                     isComplete:
- *                       type: boolean
- *       400:
- *         description: Invalid chunk or session
- *       404:
- *         description: Session not found
- *       410:
- *         description: Session expired
- */
-// router.post('/chunked/upload/:sessionId', chunkUpload.single('chunk'), asyncHandler(chunkedUploadController.uploadChunk));
-
-/**
- * @swagger
- * /api/images/chunked/complete/{sessionId}:
- *   post:
- *     summary: Complete chunked upload and assemble file
- *     tags: [Chunked Upload]
- *     parameters:
- *       - in: path
- *         name: sessionId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Upload session ID
- *     responses:
- *       201:
- *         description: Upload completed and image created
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *                 data:
- *                   $ref: '#/components/schemas/Image'
- *       400:
- *         description: Upload incomplete
- *       404:
- *         description: Session not found
- *       409:
- *         description: Duplicate image
- *       410:
- *         description: Session expired
- */
-// router.post('/chunked/complete/:sessionId', validateSync, asyncHandler(chunkedUploadController.completeUpload));
-
-/**
- * @swagger
- * /api/images/chunked/status/{sessionId}:
- *   get:
- *     summary: Get upload session status
- *     tags: [Chunked Upload]
- *     parameters:
- *       - in: path
- *         name: sessionId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Upload session ID
- *     responses:
- *       200:
- *         description: Session status
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: object
- *                   properties:
- *                     sessionId:
- *                       type: string
- *                     filename:
- *                       type: string
- *                     originalName:
- *                       type: string
- *                     status:
- *                       type: string
- *                       enum: [pending, in_progress, completed, failed, expired]
- *                     uploadedChunks:
- *                       type: integer
- *                     totalChunks:
- *                       type: integer
- *                     uploadedChunksList:
- *                       type: array
- *                       items:
- *                         type: integer
- *                     progress:
- *                       type: string
- *                     expiresAt:
- *                       type: string
- *                       format: date-time
- *                     createdAt:
- *                       type: string
- *                       format: date-time
- *       404:
- *         description: Session not found
- */
-// router.get('/chunked/status/:sessionId', validateSync, asyncHandler(chunkedUploadController.getStatus));
-
-/**
- * @swagger
- * /api/images/chunked/{sessionId}:
- *   delete:
- *     summary: Cancel and cleanup upload session
- *     tags: [Chunked Upload]
- *     parameters:
- *       - in: path
- *         name: sessionId
- *         required: true
- *         schema:
- *           type: string
- *           format: uuid
- *         description: Upload session ID
- *     responses:
- *       200:
- *         description: Session cancelled
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *       404:
- *         description: Session not found
- */
-// router.delete('/chunked/:sessionId', asyncHandler(chunkedUploadController.cancelUpload));
 
 /**
  * @swagger
@@ -1366,68 +747,80 @@ router.post('/batch', asyncHandler(imagesController.batchUpload));
  *                         type: string
  *       403:
  *         description: Forbidden in production mode
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.delete('/dev/purge', asyncHandler(purgeController.purgeAll));
 
-/**
- * @swagger
- * /api/images/dev/purge/files:
- *   delete:
- *     summary: Purge only files (keep database) - DEV ONLY
- *     tags: [Development]
- *     description: Deletes images, thumbnails, and chunks. Preserves database records.
- *     responses:
- *       200:
- *         description: Files purged successfully
- *       403:
- *         description: Forbidden in production mode
- */
-router.delete('/dev/purge/files', asyncHandler(purgeController.purgeFiles));
+
+
 
 /**
  * @swagger
- * /api/images/dev/purge/database:
- *   delete:
- *     summary: Purge only database records (keep files) - DEV ONLY
- *     tags: [Development]
- *     description: Deletes all database records. Preserves files on disk.
+ * /api/images/requestDownloadUrls:
+ *   post:
+ *     summary: Request download URLs with metadata and EXIF data
+ *     tags: [Images]
+ *     description: Get presigned download URLs along with image metadata and EXIF data for multiple images
+ *     parameters:
+ *       - in: query
+ *         name: expiry
+ *         schema:
+ *           type: integer
+ *           default: 3600
+ *         description: URL expiry time in seconds (default 1 hour)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - uuids
+ *             properties:
+ *               uuids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uuid
+ *                 description: Array of image UUIDs to get download URLs for
+ *                 example: ["867130af-dbc1-40cd-99f2-fb75baf9b8e1", "f47ac10b-58cc-4372-a567-0e02b2c3d479"]
  *     responses:
  *       200:
- *         description: Database purged successfully
- *       403:
- *         description: Forbidden in production mode
+ *         description: Download URLs generated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: integer
+ *                   description: Number of successful downloads
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     downloads:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/DownloadInfo'
+ *                     stats:
+ *                       $ref: '#/components/schemas/OperationStats'
+ *                     errors:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/OperationError'
+ *       400:
+ *         description: Invalid request body or parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
-router.delete('/dev/purge/database', asyncHandler(purgeController.purgeDatabase));
-
-/**
- * @swagger
- * /api/images/dev/purge/redis:
- *   delete:
- *     summary: Purge only Redis sessions - DEV ONLY
- *     tags: [Development]
- *     description: Deletes all upload sessions from Redis.
- *     responses:
- *       200:
- *         description: Redis sessions purged successfully
- *       403:
- *         description: Forbidden in production mode
- */
-router.delete('/dev/purge/redis', asyncHandler(purgeController.purgeRedis));
-
-/**
- * @swagger
- * /api/images/dev/purge/chunks:
- *   delete:
- *     summary: Purge only chunk directories - DEV ONLY
- *     tags: [Development]
- *     description: Deletes temporary chunk upload directories.
- *     responses:
- *       200:
- *         description: Chunks purged successfully
- *       403:
- *         description: Forbidden in production mode
- */
-router.delete('/dev/purge/chunks', asyncHandler(purgeController.purgeChunks));
+router.post('/requestDownloadUrls', validateSync, asyncHandler(imagesController.requestDownloadUrls));
 
 /**
  * @swagger
@@ -1435,12 +828,53 @@ router.delete('/dev/purge/chunks', asyncHandler(purgeController.purgeChunks));
  *   post:
  *     summary: Generate presigned URLs for direct client-side image uploads
  *     tags: [Images]
- 
+ *     description: Insert pending images and generate presigned URLs for uploading image and thumbnail files
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - images
+ *             properties:
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - uuid
+ *                     - mimeType
+ *                   properties:
+ *                     uuid:
+ *                       type: string
+ *                       format: uuid
+ *                     mimeType:
+ *                       type: string
+ *                       example: image/jpeg
+ *                     exifData:
+ *                       $ref: '#/components/schemas/ExifData'
+ *                 description: Array of image metadata to create presigned upload URLs
  *     responses:
  *       200:
- *         description: Successfully generated presigned URLs.
+ *         description: Successfully generated presigned URLs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/UploadUrls'
  *       400:
- *         description: Invalid request body or parameters.
+ *         description: Invalid request body or parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  */
 router.post('/presignUrls', validateSync, asyncHandler(imagesController.presignURLs))
 

@@ -1,16 +1,11 @@
 import { Request, Response } from 'express';
-import path from 'path';
-import { promises as fs } from 'fs';
 import {
   getAllImages,
   getImageById,
   getImageByUuid,
   getImagesByUuids,
   getImagesWithExifByUuids,
-  updateImage,
-  updateImageByUuid,
   softDeleteImage,
-  batchSoftDeleteImages,
   batchSoftDeleteImagesByUuid,
   getImageStats,
   getImagesWithExif,
@@ -19,17 +14,12 @@ import {
   replaceImageByUuid,
   getImagesSinceSequence,
   insertPendingImages,
+  getExifByImageUUID,
+  createExifData,
+  updateExifData,
 } from '../db/queries';
 import { getPaginatedImages, getPaginatedImagesWithExif, getPagePaginatedImages, getPagePaginatedImagesWithExif } from '../db/pagination.queries';
 import { AppError } from '../middleware/errorHandler';
-import {
-  processImage,
-  generateThumbnail,
-  extractExifData,
-  getFileExtension,
-} from '../utils/imageProcessor';
-import { getImagePaths, getTempImagePaths, IMAGES_DIR, THUMBNAILS_DIR } from '../middleware/upload';
-import logger from '../config/logger';
 import {
   createBatchOperation,
   updateBatchOperationSummary,
@@ -40,6 +30,19 @@ import {
 import { getClientId } from '../middleware/syncValidation';
 import { Image, NewImage } from '../db/schema';
 import { generatePresignedUrl, generatePresignedGetUrl, getThumbnailStream } from '../config/minio';
+
+/**
+ * Sanitize EXIF data from user input
+ * Removes fields that should be auto-generated or determined server-side
+ */
+function sanitizeExifData(rawExifData: any) {
+  const {
+    id,           // Auto-generated primary key
+    imageId,      // Determined from UUID
+    ...cleanExifData
+  } = rawExifData;
+  return cleanExifData;
+}
 
 export class ImagesController {
 
@@ -119,25 +122,6 @@ export class ImagesController {
     });
   }
 
-  // Get single image by ID
-  async getById(req: Request, res: Response) {
-    const id = parseInt(req.params.id);
-
-    if (isNaN(id)) {
-      throw new AppError('Invalid image ID', 400);
-    }
-
-    const image = await getImageById(id);
-
-    if (!image) {
-      throw new AppError('Image not found', 404);
-    }
-
-    res.json({
-      success: true,
-      data: image,
-    });
-  }
 
   // Get single image by UUID
   async getByUuid(req: Request, res: Response) {
@@ -163,37 +147,6 @@ export class ImagesController {
     });
   }
 
-  // Update image
-  async update(req: Request, res: Response) {
-    const id = parseInt(req.params.id);
-
-    if (isNaN(id)) {
-      throw new AppError('Invalid image ID', 400);
-    }
-
-    const updatedImage = await updateImage(id, req.body);
-
-    if (!updatedImage) {
-      throw new AppError('Image not found', 404);
-    }
-
-    // Log update to sync log
-    const clientId = getClientId(req);
-    await logSuccessfulOperation({
-      operation: 'update',
-      imageId: id,
-      clientId,
-      metadata: {
-        updated_fields: Object.keys(req.body),
-        filename: updatedImage.filename,
-      },
-    });
-
-    res.json({
-      success: true,
-      data: updatedImage,
-    });
-  }
 
   // Soft delete image
   delete = async (req: Request, res: Response) => {
@@ -228,87 +181,9 @@ export class ImagesController {
     });
   }
 
-  // Batch soft delete images by IDs
-  async batchDeleteByIds(req: Request, res: Response) {
-    const { ids } = req.body;
 
-    if (!Array.isArray(ids) || ids.length === 0) {
-      throw new AppError('Invalid request. Provide an array of image IDs', 400);
-    }
 
-    // Validate all IDs are numbers
-    const validIds = ids.filter(id => typeof id === 'number' && !isNaN(id));
-
-    if (validIds.length === 0) {
-      throw new AppError('No valid image IDs provided', 400);
-    }
-
-    const clientId = getClientId(req);
-
-    // Create batch operation parent
-    const batchOperation = await createBatchOperation({
-      operation: 'batch_delete',
-      clientId,
-      totalCount: validIds.length,
-      metadata: {
-        request_source: 'api',
-        delete_by: 'ids',
-      },
-    });
-
-    const deletedImages = await batchSoftDeleteImages(validIds);
-
-    // Log each successful deletion
-    for (const deletedImage of deletedImages) {
-      await logSuccessfulOperation({
-        operation: 'delete',
-        imageId: deletedImage.id,
-        clientId,
-        groupOperationId: batchOperation.id,
-        metadata: {
-          filename: deletedImage.filename,
-          uuid: deletedImage.uuid,
-        },
-      });
-    }
-
-    // Log failed deletions
-    const failedCount = validIds.length - deletedImages.length;
-    const deletedIds = new Set(deletedImages.map(img => img.id));
-    for (const id of validIds) {
-      if (!deletedIds.has(id)) {
-        await logFailedOperation({
-          operation: 'delete',
-          imageId: id,
-          clientId,
-          groupOperationId: batchOperation.id,
-          errorMessage: 'Image not found or already deleted',
-        });
-      }
-    }
-
-    // Update batch operation summary
-    await updateBatchOperationSummary(
-      batchOperation.id,
-      deletedImages.length,
-      failedCount
-    );
-
-    res.json({
-      success: true,
-      message: `Soft deleted ${deletedImages.length} of ${validIds.length} images`,
-      data: {
-        deleted: deletedImages,
-        stats: {
-          requested: validIds.length,
-          successful: deletedImages.length,
-          failed: validIds.length - deletedImages.length,
-        },
-      },
-    });
-  }
-
-  // Batch soft delete images by UUIDs
+  // Unified delete handler - accepts array, handles single or batch based on length
   async batchDeleteByUuids(req: Request, res: Response) {
     const { uuids } = req.body;
 
@@ -324,17 +199,21 @@ export class ImagesController {
     }
 
     const clientId = getClientId(req);
+    const isBatchOperation = validUuids.length > 1;
 
-    // Create batch operation parent
-    const batchOperation = await createBatchOperation({
-      operation: 'batch_delete',
-      clientId,
-      totalCount: validUuids.length,
-      metadata: {
-        request_source: 'api',
-        delete_by: 'uuids',
-      },
-    });
+    // Create batch operation parent if batch
+    let batchOperation;
+    if (isBatchOperation) {
+      batchOperation = await createBatchOperation({
+        operation: 'batch_delete',
+        clientId,
+        totalCount: validUuids.length,
+        metadata: {
+          request_source: 'api',
+          delete_by: 'uuids',
+        },
+      });
+    }
 
     const deletedImages = await batchSoftDeleteImagesByUuid(validUuids);
 
@@ -344,7 +223,7 @@ export class ImagesController {
         operation: 'delete',
         imageId: deletedImage.id,
         clientId,
-        groupOperationId: batchOperation.id,
+        groupOperationId: isBatchOperation ? batchOperation!.id : undefined,
         metadata: {
           uuid: deletedImage.uuid,
           filename: deletedImage.filename,
@@ -357,28 +236,34 @@ export class ImagesController {
     const deletedUuids = new Set(deletedImages.map(img => img.uuid));
     for (const uuid of validUuids) {
       if (!deletedUuids.has(uuid)) {
-        await logFailedOperation({
-          operation: 'delete',
-          clientId,
-          groupOperationId: batchOperation.id,
-          errorMessage: 'Image not found or already deleted',
-          metadata: {
-            uuid,
-          },
-        });
+        if (isBatchOperation) {
+          await logFailedOperation({
+            operation: 'delete',
+            clientId,
+            groupOperationId: batchOperation!.id,
+            errorMessage: 'Image not found or already deleted',
+            metadata: {
+              uuid,
+            },
+          });
+        }
       }
     }
 
-    // Update batch operation summary
-    await updateBatchOperationSummary(
-      batchOperation.id,
-      deletedImages.length,
-      failedCount
-    );
+    // Update batch operation summary if batch
+    if (isBatchOperation) {
+      await updateBatchOperationSummary(
+        batchOperation!.id,
+        deletedImages.length,
+        failedCount
+      );
+    }
 
     res.json({
       success: true,
-      message: `Soft deleted ${deletedImages.length} of ${validUuids.length} images`,
+      message: isBatchOperation
+        ? `Soft deleted ${deletedImages.length} of ${validUuids.length} images`
+        : 'Image deleted successfully',
       data: {
         deleted: deletedImages,
         stats: {
@@ -390,81 +275,102 @@ export class ImagesController {
     });
   }
 
-  // Batch update image metadata by UUIDs
-  async batchUpdate(req: Request, res: Response) {
+  // Unified update EXIF handler - accepts array, handles single or batch based on length
+  async UpdateExifData(req: Request, res: Response) {
     const { updates } = req.body;
 
     if (!Array.isArray(updates) || updates.length === 0) {
-      throw new AppError('Invalid request. Provide an array of image updates', 400);
+      throw new AppError('Invalid request. Provide an array of EXIF updates', 400);
     }
 
-    // Validate all updates have UUID
+    // Validate all updates have UUID and exifData
     for (const update of updates) {
       if (!update.uuid || typeof update.uuid !== 'string') {
         throw new AppError('Each update must have a valid UUID', 400);
       }
+      if (!update.exifData) {
+        throw new AppError('Each update must have exifData', 400);
+      }
     }
 
     const clientId = getClientId(req);
+    const isBatchOperation = updates.length > 1;
 
-    // Create batch operation parent
-    const batchOperation = await createBatchOperation({
-      operation: 'batch_update',
-      clientId,
-      totalCount: updates.length,
-      metadata: {
-        request_source: 'api',
-      },
-    });
+    // Batch fetch all images and their EXIF data in one query
+    const uuids = updates.map(u => u.uuid);
+    const imagesWithExif = await getImagesWithExifByUuids(uuids);
+
+    // Create a map for quick lookup
+    const imageMap = new Map(imagesWithExif.map(item => [
+      item.images.uuid,
+      { image: item.images, exif: item.exif_data }
+    ]));
+
+    // Create batch operation parent if batch
+    let batchOperation;
+    if (isBatchOperation) {
+      batchOperation = await createBatchOperation({
+        operation: 'batch_update_exif',
+        clientId,
+        totalCount: updates.length,
+        metadata: {
+          request_source: 'api',
+        },
+      });
+    }
 
     const updatedImages = [];
     const errors = [];
 
     for (const update of updates) {
       try {
-        const { uuid, ...updateData } = update;
+        const { uuid, exifData: rawExifData } = update;
+        const imageData = imageMap.get(uuid);
 
-        // Only allow specific fields to be updated
-        const allowedFields: Partial<NewImage> = {};
-        if (updateData.filename) allowedFields.filename = updateData.filename;
-
-        if (Object.keys(allowedFields).length === 0) {
-          errors.push({
-            uuid,
-            error: 'No valid fields to update',
-          });
-          continue;
-        }
-
-        // Update the image
-        const updatedImage = await updateImageByUuid(uuid, allowedFields);
-
-        if (!updatedImage) {
+        if (!imageData) {
           errors.push({
             uuid,
             error: 'Image not found',
           });
-          await logFailedOperation({
-            operation: 'update',
-            clientId,
-            groupOperationId: batchOperation.id,
-            errorMessage: 'Image not found',
-            metadata: { uuid },
-          });
+          if (isBatchOperation) {
+            await logFailedOperation({
+              operation: 'update_exif',
+              clientId,
+              groupOperationId: batchOperation!.id,
+              errorMessage: 'Image not found',
+              metadata: { uuid },
+            });
+          }
           continue;
         }
 
-        updatedImages.push(updatedImage);
+        const { image, exif: existingExif } = imageData;
+
+        // Sanitize EXIF data
+        const exifData = sanitizeExifData(rawExifData);
+
+        // Update or create EXIF data
+        let updatedExif;
+        if (existingExif) {
+          updatedExif = await updateExifData(image.uuid, exifData);
+        } else {
+          updatedExif = await createExifData({ ...exifData, uuid: image.uuid });
+        }
+
+        updatedImages.push({
+          ...image,
+          exifData: updatedExif,
+        });
 
         // Log successful update
         await logSuccessfulOperation({
-          operation: 'update',
-          imageId: updatedImage.id,
+          operation: 'update_exif',
+          imageId: image.id,
           clientId,
-          groupOperationId: batchOperation.id,
+          groupOperationId: isBatchOperation ? batchOperation!.id : undefined,
           metadata: {
-            uuid: updatedImage.uuid,
-            updated_fields: Object.keys(allowedFields),
+            uuid: image.uuid,
+            updated_fields: Object.keys(exifData),
           },
         });
       } catch (error: any) {
@@ -473,28 +379,34 @@ export class ImagesController {
           error: error.message || 'Unknown error',
         });
 
-        await logFailedOperation({
-          operation: 'update',
-          clientId,
-          groupOperationId: batchOperation.id,
-          errorMessage: error.message || 'Unknown error',
-          metadata: {
-            uuid: update.uuid,
-          },
-        });
+        if (isBatchOperation) {
+          await logFailedOperation({
+            operation: 'update_exif',
+            clientId,
+            groupOperationId: batchOperation!.id,
+            errorMessage: error.message || 'Unknown error',
+            metadata: {
+              uuid: update.uuid,
+            },
+          });
+        }
       }
     }
 
-    // Update batch operation summary
-    await updateBatchOperationSummary(
-      batchOperation.id,
-      updatedImages.length,
-      errors.length
-    );
+    // Update batch operation summary if batch
+    if (isBatchOperation) {
+      await updateBatchOperationSummary(
+        batchOperation!.id,
+        updatedImages.length,
+        errors.length
+      );
+    }
 
     res.json({
       success: true,
-      message: `Updated ${updatedImages.length} of ${updates.length} images`,
+      message: isBatchOperation
+        ? `Updated ${updatedImages.length} of ${updates.length} images`
+        : 'EXIF data updated successfully',
       data: {
         updated: updatedImages,
         stats: {
@@ -504,11 +416,102 @@ export class ImagesController {
         },
         errors,
       },
-    }); 1
+    });
   }
 
 
+  // Request download URLs - Get image metadata, EXIF, and presigned GET URLs
+  async requestDownloadUrls(req: Request, res: Response) {
+    const { uuids } = req.body;
+    const expiry = req.query.expiry ? parseInt(req.query.expiry as string) : 3600; // Default 1 hour
+
+    if (!Array.isArray(uuids) || uuids.length === 0) {
+      throw new AppError('Invalid request. Provide an array of image UUIDs', 400);
+    }
+
+    // Validate all UUIDs are strings
+    const validUuids = uuids.filter(uuid => typeof uuid === 'string' && uuid.length > 0);
+
+    if (validUuids.length === 0) {
+      throw new AppError('No valid image UUIDs provided', 400);
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    for (const uuid of validUuids) {
+      if (!uuidRegex.test(uuid)) {
+        throw new AppError(`Invalid UUID format: ${uuid}`, 400);
+      }
+    }
+
+    // Fetch images with EXIF data
+    const imagesWithExif = await getImagesWithExifByUuids(validUuids);
+
+    const results = [];
+    const errors = [];
+
+    for (const uuid of validUuids) {
+      try {
+        const imageData = imagesWithExif.find(item => item.images.uuid === uuid);
+
+        if (!imageData) {
+          errors.push({
+            uuid,
+            error: 'Image not found',
+          });
+          continue;
+        }
+
+        const { images: image, exif_data: exifData } = imageData;
+
+        // Generate presigned GET URL
+        const downloadUrl = await generatePresignedGetUrl(image.uuid, image.format, expiry);
+
+        results.push({
+          uuid: image.uuid,
+          filename: image.filename,
+          downloadUrl,
+          expiresIn: expiry,
+          metadata: {
+            id: image.id,
+            format: image.format,
+            fileSize: image.fileSize,
+            width: image.width,
+            height: image.height,
+            hash: image.hash,
+            mimeType: image.mimeType,
+            isCorrupted: image.isCorrupted,
+            createdAt: image.createdAt,
+            updatedAt: image.updatedAt,
+          },
+          exifData: exifData || null,
+        });
+      } catch (error: any) {
+        errors.push({
+          uuid,
+          error: error.message || 'Unknown error',
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      count: results.length,
+      data: {
+        downloads: results,
+        stats: {
+          requested: validUuids.length,
+          successful: results.length,
+          failed: errors.length,
+        },
+        errors,
+      },
+    });
+  }
+
   presignURLs = async (req: Request, res: Response) => {
+
+    // image.exifData is optional here
     const { images } = req.body;
 
     if (!Array.isArray(images) || images.length === 0) {
@@ -524,12 +527,12 @@ export class ImagesController {
       }
       return generatePresignedUrl(image.uuid, image.mimeType);
     }))).map((result, index) => {
-        if (result.status === 'fulfilled') {
-          return result.value;
-        } else {
-          return {}
-        }
-      })
+      if (result.status === 'fulfilled') {
+        return result.value;
+      } else {
+        return {}
+      }
+    })
     console.log(`presigned URLs: ${JSON.stringify(signedUrls)}`)
     res.json({
       success: true,
@@ -538,180 +541,7 @@ export class ImagesController {
   }
 
 
-  // Upload single or multiple images
-  upload = async (req: Request, res: Response) => {
-    if (!req.files || (Array.isArray(req.files) && req.files.length === 0)) {
-      throw new AppError('No files uploaded', 400);
-    }
 
-    const files = Array.isArray(req.files) ? req.files : [req.files.images];
-    const uploadedImages = [];
-    const errors = [];
-    const clientId = getClientId(req);
-
-    // Extract client-provided UUIDs if present
-    const clientUuids = req.body.uuids ? JSON.parse(req.body.uuids) : null;
-
-    // Validate UUIDs if provided
-    if (clientUuids) {
-      if (!Array.isArray(clientUuids)) {
-        throw new AppError('uuids must be an array', 400);
-      }
-      if (clientUuids.length !== files.flat().length) {
-        throw new AppError('Number of UUIDs must match number of files', 400);
-      }
-      // Basic UUID format validation
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      for (const uuid of clientUuids) {
-        if (!uuidRegex.test(uuid)) {
-          throw new AppError(`Invalid UUID format: ${uuid}`, 400);
-        }
-      }
-    }
-
-    // Create batch operation if multiple files
-    const flatFiles = files.flat();
-    let batchOperation = null;
-    if (flatFiles.length > 1) {
-      batchOperation = await createBatchOperation({
-        operation: 'batch_upload',
-        clientId,
-        totalCount: flatFiles.length,
-        metadata: {
-          request_source: 'api',
-          user_agent: req.get('user-agent'),
-          ip_address: req.ip,
-        },
-      });
-    }
-    for (let i = 0; i < flatFiles.length; i++) {
-      const file = flatFiles[i];
-      const tempFilePath = path.join(IMAGES_DIR, file.filename);
-
-      try {
-        // Process image and get metadata from temp file
-        const imageMetadata = await processImage(tempFilePath);
-
-        // Check for duplicates by hash
-        const existingImage = await getImageByHash(imageMetadata.hash);
-        if (existingImage) {
-          // Delete temp file
-          await fs.unlink(tempFilePath).catch(() => { });
-          errors.push({
-            filename: file.originalname,
-            error: 'Duplicate image (already exists)',
-            hash: imageMetadata.hash,
-          });
-          continue;
-        }
-
-        // Extract EXIF data
-        let exifData = null;
-        if (!imageMetadata.isCorrupted) {
-          exifData = await extractExifData(tempFilePath);
-        }
-
-        // Prepare image data
-        const format = getFileExtension(file.originalname);
-        const imageData: any = {
-          filename: file.originalname, // Store original filename for display
-          fileSize: imageMetadata.size,
-          format: format,
-          width: imageMetadata.width || null,
-          height: imageMetadata.height || null,
-          hash: imageMetadata.hash,
-          mimeType: file.mimetype,
-          isCorrupted: imageMetadata.isCorrupted,
-        };
-
-        // Use client-provided UUID if available
-        if (clientUuids && clientUuids[i]) {
-          imageData.uuid = clientUuids[i];
-        }
-
-        // Create image with EXIF data (UUID will be auto-generated if not provided)
-        const newImage = await createImageWithExif(imageData, exifData || undefined);
-
-        // Rename temp file to UUID-based filename
-        const { imagePath, thumbnailPath } = getImagePaths(newImage.uuid, format);
-        await fs.rename(tempFilePath, imagePath);
-
-        // Generate thumbnail if image is not corrupted
-        if (!imageMetadata.isCorrupted) {
-          try {
-            await generateThumbnail(imagePath, thumbnailPath);
-          } catch (error) {
-            logger.error('Error generating thumbnail:', error);
-          }
-        }
-
-        uploadedImages.push(newImage);
-
-        // Log successful upload to sync log
-        await logSuccessfulOperation({
-          operation: 'upload',
-          imageId: newImage.id,
-          clientId,
-          groupOperationId: batchOperation?.id,
-          metadata: {
-            original_filename: file.originalname,
-            file_size: imageMetadata.size,
-            file_hash: imageMetadata.hash,
-            is_corrupted: imageMetadata.isCorrupted,
-          },
-        });
-      } catch (error: any) {
-        errors.push({
-          filename: file.originalname,
-          error: error.message || 'Unknown error',
-        });
-
-        // Log failed upload to sync log
-        await logFailedOperation({
-          operation: 'upload',
-          clientId,
-          groupOperationId: batchOperation?.id,
-          errorMessage: error.message || 'Unknown error',
-          metadata: {
-            original_filename: file.originalname,
-          },
-        });
-      }
-    }
-
-    // Update batch operation summary if it was a batch
-    if (batchOperation) {
-      await updateBatchOperationSummary(
-        batchOperation.id,
-        uploadedImages.length,
-        errors.length
-      );
-    }
-
-    res.status(201).json({
-      success: true,
-      message: `Uploaded ${uploadedImages.length} of ${flatFiles.length} images`,
-      data: {
-        uploaded: uploadedImages,
-        failed: errors,
-        stats: {
-          total: flatFiles.length,
-          successful: uploadedImages.length,
-          failed: errors.length,
-          corrupted: uploadedImages.filter(img => img.isCorrupted).length,
-        },
-      },
-    });
-  }
-
-  // Batch upload from folder configuration
-  batchUpload = async (req: Request, res: Response) => {
-    // TODO: Implement batch upload from folder config JSON
-    res.status(501).json({
-      success: false,
-      message: 'Batch upload endpoint not yet implemented',
-    });
-  }
 
   // Get paginated images with cursor-based pagination
   getPaginated = async (req: Request, res: Response) => {
@@ -908,104 +738,156 @@ export class ImagesController {
     });
   }
 
-  // Get thumbnail by UUID - streams directly from MinIO
-  async getThumbnailByUuid(req: Request, res: Response) {
-    const { uuid } = req.params;
 
-    const image = await getImageByUuid(uuid);
 
-    if (!image) {
-      throw new AppError('Image not found', 404);
+  // Unified replace handler - accepts array, handles single or batch based on length
+  async replaceImages(req: Request, res: Response) {
+    const { replacements } = req.body;
+
+    // Validate input
+    if (!Array.isArray(replacements) || replacements.length === 0) {
+      throw new AppError('Invalid request. Provide an array of image replacements', 400);
     }
 
-    try {
-      // Get thumbnail stream from MinIO
-      const stream = await getThumbnailStream(image.uuid);
-
-      // Set content type header
-      res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
-
-      // Pipe the stream to the response
-      stream.pipe(res);
-
-      stream.on('error', (error) => {
-        logger.error('Error streaming thumbnail:', error);
-        if (!res.headersSent) {
-          throw new AppError('Thumbnail not found', 404);
-        }
-      });
-    } catch (error: any) {
-      if (error.code === 'NotFound') {
-        throw new AppError('Thumbnail not found', 404);
+    // Validate each replacement has required fields
+    for (const replacement of replacements) {
+      if (!replacement.uuid || !replacement.filename || !replacement.format || !replacement.mimeType) {
+        throw new AppError('Each replacement must have uuid, filename, format, and mimeType', 400);
       }
-      throw new AppError('Error retrieving thumbnail', 500);
-    }
-  }
-
-  // Replace image by UUID - Update metadata and generate presigned URLs
-  async replaceImage(req: Request, res: Response) {
-    const { uuid } = req.params;
-    const { filename, format, mimeType, width, height, fileSize, hash } = req.body;
-
-    // Validate required fields
-    if (!filename || !format || !mimeType) {
-      throw new AppError('filename, format, and mimeType are required', 400);
     }
 
-    // Check if image exists
-    const existingImage = await getImageByUuid(uuid);
-    if (!existingImage) {
-      throw new AppError('Image not found', 404);
-    }
-
-    // Prepare image data for replacement
-    // Note: status, updatedAt, and deletedAt are handled by replaceImageByUuid
-    const imageData = {
-      filename,
-      format,
-      mimeType,
-      width: width || null,
-      height: height || null,
-      fileSize: fileSize || null,
-      hash: hash || null,
-    };
-
-    // Update image metadata in database
-    const replacedImage = await replaceImageByUuid(uuid, imageData, undefined);
-
-    // Generate presigned URLs for client to upload replacement image and thumbnail
-    const presignedUrls = await generatePresignedUrl(uuid, mimeType);
-
-    // Log replacement initiation to sync log
     const clientId = getClientId(req);
-    await logSuccessfulOperation({
-      operation: 'replace',
-      imageId: existingImage.id,
-      clientId,
-      metadata: {
-        uuid,
-        old_filename: existingImage.filename,
-        old_format: existingImage.format,
-        new_filename: filename,
-        new_format: format,
-        status: 'pending',
-      },
-    });
+    const isBatchOperation = replacements.length > 1;
+
+    // Create batch operation parent if batch
+    let batchOperation;
+    if (isBatchOperation) {
+      batchOperation = await createBatchOperation({
+        operation: 'batch_replace',
+        clientId,
+        totalCount: replacements.length,
+        metadata: {
+          request_source: 'api',
+        },
+      });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const replacement of replacements) {
+      try {
+        const { uuid, filename, format, mimeType, width, height, fileSize, hash, exifData: rawExifData } = replacement;
+
+        // Check if image exists
+        const existingImage = await getImageByUuid(uuid);
+        if (!existingImage) {
+          errors.push({
+            uuid,
+            error: 'Image not found',
+          });
+          if (isBatchOperation) {
+            await logFailedOperation({
+              operation: 'replace',
+              clientId,
+              groupOperationId: batchOperation!.id,
+              errorMessage: 'Image not found',
+              metadata: { uuid },
+            });
+          }
+          continue;
+        }
+
+        // Prepare image data for replacement
+        const imageData = {
+          filename,
+          format,
+          mimeType,
+          width: width || null,
+          height: height || null,
+          fileSize: fileSize || null,
+          hash: hash || null,
+        };
+
+        // Sanitize EXIF data if provided
+        const exifData = rawExifData ? sanitizeExifData(rawExifData) : undefined;
+
+        // Update image metadata in database (with EXIF if provided)
+        const replacedImage = await replaceImageByUuid(uuid, imageData, exifData);
+
+        // Generate presigned URLs for client to upload replacement image and thumbnail
+        const presignedUrls = await generatePresignedUrl(uuid, mimeType);
+
+        // Log replacement initiation to sync log
+        await logSuccessfulOperation({
+          operation: 'replace',
+          imageId: existingImage.id,
+          clientId,
+          groupOperationId: isBatchOperation ? batchOperation!.id : undefined,
+          metadata: {
+            uuid,
+            old_filename: existingImage.filename,
+            old_format: existingImage.format,
+            new_filename: filename,
+            new_format: format,
+            status: 'pending',
+            has_exif_update: !!exifData,
+          },
+        });
+
+        results.push({
+          image: replacedImage,
+          uploadUrls: {
+            imageUrl: presignedUrls.imageUrl,
+            thumbnailUrl: presignedUrls.thumbnailUrl,
+            expiresIn: 900, // 15 minutes
+          },
+        });
+      } catch (error: any) {
+        errors.push({
+          uuid: replacement.uuid,
+          error: error.message || 'Unknown error',
+        });
+
+        if (isBatchOperation) {
+          await logFailedOperation({
+            operation: 'replace',
+            clientId,
+            groupOperationId: batchOperation!.id,
+            errorMessage: error.message || 'Unknown error',
+            metadata: {
+              uuid: replacement.uuid,
+            },
+          });
+        }
+      }
+    }
+
+    // Update batch operation summary if batch
+    if (isBatchOperation) {
+      await updateBatchOperationSummary(
+        batchOperation!.id,
+        results.length,
+        errors.length
+      );
+    }
 
     res.json({
       success: true,
-      message: 'Metadata updated, ready for client upload',
+      message: isBatchOperation
+        ? `Replaced ${results.length} of ${replacements.length} images`
+        : 'Metadata updated, ready for client upload',
       data: {
-        image: replacedImage,
-        uploadUrls: {
-          imageUrl: presignedUrls.imageUrl,
-          thumbnailUrl: presignedUrls.thumbnailUrl,
-          expiresIn: 900, // 15 minutes
+        replaced: results,
+        stats: {
+          requested: replacements.length,
+          successful: results.length,
+          failed: errors.length,
         },
+        errors,
       },
     });
   }
-}
 
+}
 export const imagesController = new ImagesController();
