@@ -32,7 +32,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 10sW
       timeout: 5s
       retries: 5
     command: redis-server --appendonly yes
@@ -41,6 +41,7 @@ services:
   minio:
     image: quay.io/minio/minio:latest
     container_name: image-mgmt-storage
+    # 1. ALLOW MINIO TO REACH THE HOST
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -49,12 +50,10 @@ services:
     environment:
       MINIO_ROOT_USER: "admin"
       MINIO_ROOT_PASSWORD: "password"
-      
-      # 👇 UPDATE THESE TWO LINES
-      # We add the port :9999 to the public URL
-      MINIO_SERVER_URL: "http://s3.192.168.0.24.nip.io:9999"
-      MINIO_BROWSER_REDIRECT_URL: "http://console.192.168.0.24.nip.io:9999"
-      
+      # TELLS MINIO: "You are actually accessible here"
+      # MINIO_SERVER_URL: "http://localhost:9999/storage"
+      # TELLS MINIO: "Redirect browser logins here"
+      MINIO_BROWSER_REDIRECT_URL: "http://localhost:9999/storage/ui"
       MINIO_NOTIFY_WEBHOOK_ENABLE_primary: "on"
       MINIO_NOTIFY_WEBHOOK_ENDPOINT_primary: "http://host.docker.internal:3000/webhook/minio"
       MINIO_NOTIFY_WEBHOOK_QUEUE_LIMIT_primary: "0"

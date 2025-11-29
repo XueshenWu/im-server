@@ -1,13 +1,23 @@
 import * as Minio from 'minio';
 
 
-const minioClient = new Minio.Client({
+const minioClientInternal = new Minio.Client({
     endPoint: process.env.MINIO_ENDPOINT || 'localhost',
     port: parseInt(process.env.MINIO_PORT || '9000'),
     useSSL: process.env.MINIO_USE_SSL === 'true',
     accessKey: process.env.MINIO_ACCESS_KEY || 'admin',
     secretKey: process.env.MINIO_SECRET_KEY || 'password',
 });
+
+
+const minioClient = new Minio.Client({
+    endPoint:'s3.192.168.0.24.nip.io',
+    port: 9999,
+    useSSL: false,
+    accessKey: 'admin',
+    secretKey: 'password'
+})
+
 
 // Define Buckets
 const BUCKET_IMAGES = process.env.MINIO_BUCKET_IMAGES || 'images';
@@ -174,4 +184,4 @@ export const getImageStream = async (uuid: string, format: string) => {
 //     return stream;
 // };
 
-export default minioClient;
+export default minioClientInternal;

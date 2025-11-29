@@ -99,10 +99,8 @@ const startServer = async () => {
   await setupMinio();
 
   // Start server
-  app.listen(Number(PORT), HOST, () => {
-    logger.info(`Server is running on http://${HOST}:${PORT}`);
-    logger.info(`API Documentation: http://${HOST}:${PORT}/api-docs`);
-    logger.info(`Health Check: http://${HOST}:${PORT}/api/health`);
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log('Server is running and listening on ALL interfaces on port', PORT);
   });
 
 };
