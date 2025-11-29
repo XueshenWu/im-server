@@ -28,9 +28,10 @@ import {
   getCurrentSyncSequence,
 } from '../utils/syncLogger';
 import { getClientId } from '../middleware/syncValidation';
-import { Image, NewImage } from '../db/schema';
+import { Image, NewImage, syncLog, images } from '../db/schema';
 import { generatePresignedUrl, generatePresignedGetUrl } from '../config/minio';
 import { db } from '../db';
+import { eq, desc, sql, and, inArray, isNull, gte, lte } from 'drizzle-orm';
 
 /**
  * Sanitize EXIF data from user input
@@ -166,6 +167,110 @@ export class ImagesController {
     res.json({
       success: true,
       data: stats,
+    });
+  }
+
+  // Get daily upload/delete summary for specified time window
+  async getSummary(req: Request, res: Response) {
+    const daysParam = req.query.days as string | undefined;
+    let days = daysParam ? parseInt(daysParam) : 7;
+
+    // Validate days parameter
+    if (isNaN(days) || days < 1) {
+      throw new AppError('Invalid days parameter. Must be a positive integer', 400);
+    }
+
+    // Cap at 14 days max
+    if (days > 14) {
+      days = 14;
+    }
+
+    // Calculate the date range (from today-days to today)
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // End of today
+
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - days);
+    startDate.setHours(0, 0, 0, 0); // Start of the day
+
+    // Query sync log for upload and delete operations within the date range
+    const operations = await db
+      .select({
+        operation: syncLog.operation,
+        createdAt: syncLog.createdAt,
+        status: syncLog.status,
+      })
+      .from(syncLog)
+      .where(
+        and(
+          gte(syncLog.createdAt, startDate),
+          lte(syncLog.createdAt, today),
+          eq(syncLog.status, 'completed'),
+          inArray(syncLog.operation, ['upload', 'delete', 'replace'])
+        )
+      )
+      .orderBy(desc(syncLog.createdAt));
+
+    // Group operations by date and operation type
+    const dailySummary: Record<string, { uploaded: number; deleted: number; date: string }> = {};
+
+    // Initialize all days in the range
+    for (let i = 0; i < days; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      const dateKey = date.toISOString().split('T')[0];
+      dailySummary[dateKey] = {
+        date: dateKey,
+        uploaded: 0,
+        deleted: 0,
+      };
+    }
+
+    // Count operations per day
+    for (const op of operations) {
+      const dateKey = op.createdAt.toISOString().split('T')[0];
+
+      if (dailySummary[dateKey]) {
+        if (op.operation === 'upload' || op.operation === 'replace') {
+          dailySummary[dateKey].uploaded++;
+        } else if (op.operation === 'delete') {
+          dailySummary[dateKey].deleted++;
+        }
+      }
+    }
+
+    // Convert to array and sort by date (most recent first)
+    const summaryArray = Object.values(dailySummary).sort((a, b) =>
+      b.date.localeCompare(a.date)
+    );
+
+    res.json({
+      success: true,
+      data: summaryArray,
+    });
+  }
+
+  // Get format statistics for all images
+  async getFormatStats(req: Request, res: Response) {
+    // Query images table to count by format
+    const formatCounts = await db
+      .select({
+        format: images.format,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(images)
+      .where(
+        and(
+          isNull(images.deletedAt),
+          eq(images.status, 'processed')
+        )
+      )
+      .groupBy(images.format)
+      .orderBy(desc(sql`count(*)`));
+
+    res.json({
+      success: true,
+      data: formatCounts,
     });
   }
 

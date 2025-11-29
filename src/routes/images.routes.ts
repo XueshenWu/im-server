@@ -292,6 +292,85 @@ router.get('/metadata', validateSync, asyncHandler(imagesController.getMetadata)
  */
 router.get('/stats', validateSync, asyncHandler(imagesController.getStats));
 
+/**
+ * @swagger
+ * /api/images/summary:
+ *   get:
+ *     summary: Get daily upload/delete summary for specified time window
+ *     tags: [Images]
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 14
+ *           default: 7
+ *         description: Number of days to retrieve summary for (from today-days to today, max 14)
+ *     responses:
+ *       200:
+ *         description: Daily summary of image uploads and deletes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date:
+ *                         type: string
+ *                         format: date
+ *                         example: "2025-11-29"
+ *                       uploaded:
+ *                         type: integer
+ *                         example: 15
+ *                       deleted:
+ *                         type: integer
+ *                         example: 3
+ *       400:
+ *         description: Invalid parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.get('/summary', validateSync, asyncHandler(imagesController.getSummary));
+
+/**
+ * @swagger
+ * /api/images/format-stats:
+ *   get:
+ *     summary: Get image count statistics grouped by format
+ *     tags: [Images]
+ *     responses:
+ *       200:
+ *         description: Format statistics for all images
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       format:
+ *                         type: string
+ *                         example: "jpg"
+ *                       count:
+ *                         type: integer
+ *                         example: 42
+ */
+router.get('/format-stats', validateSync, asyncHandler(imagesController.getFormatStats));
+
 
 
 /**

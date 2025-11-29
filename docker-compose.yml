@@ -1,6 +1,47 @@
 version: "3.8"
 
 services:
+  # --- NEW: YOUR NODE SERVER ---
+  api:
+    container_name: image-mgmt-api
+    build: . # Builds from the Dockerfile in current directory
+    restart: unless-stopped
+    ports:
+      - "3000:3000" # Optional: Keep this if you want to test directly, but Nginx handles it now
+    environment:
+
+      - REDIS_HOST=redis
+
+
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=postgres
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
+
+      - MINIO_ENDPOINT=minio
+      - REDIS_PORT=6379
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=password
+
+      - PUBLIC_MINIO_URL=http://s3.192.168.0.24.nip.io:9999
+
+
+
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    healthcheck:
+
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => {if(!r.ok) process.exit(1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+
   # --- Database ---
   postgres:
     image: postgres:16-alpine
@@ -49,12 +90,12 @@ services:
     environment:
       MINIO_ROOT_USER: "admin"
       MINIO_ROOT_PASSWORD: "password"
-      
+
       # 👇 UPDATE THESE TWO LINES
       # We add the port :9999 to the public URL
       MINIO_SERVER_URL: "http://s3.192.168.0.24.nip.io:9999"
       MINIO_BROWSER_REDIRECT_URL: "http://console.192.168.0.24.nip.io:9999"
-      
+
       MINIO_NOTIFY_WEBHOOK_ENABLE_primary: "on"
       MINIO_NOTIFY_WEBHOOK_ENDPOINT_primary: "http://host.docker.internal:3000/webhook/minio"
       MINIO_NOTIFY_WEBHOOK_QUEUE_LIMIT_primary: "0"
@@ -67,7 +108,6 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-
 
     # --- Web Server ---
   nginx:
