@@ -546,11 +546,12 @@ export async function insertPendingImages(newImages: NewImageWithExif[]) {
 
   // Insert images
   await db.insert(images).values(newImages.map(newImage => {
-    const { exifData, ...imageData } = newImage;
+    const { exifData,createdAt,updatedAt, deletedAt, ...imageData } = newImage;
     return {
       status: 'pending',
       createdAt: new Date(),
       updatedAt: new Date(),
+      deletedAt: null,
       ...imageData
     } as NewImage;
   }));

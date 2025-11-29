@@ -129,7 +129,10 @@ export class ImagesController {
     const exif = await getExifByImageUUID(uuid);
 
     if (!exif) {
-      throw new AppError('EXIF data not found', 404);
+      res.json({
+        success: true,
+        data: {},
+      });
     }
 
     res.json({
@@ -139,7 +142,7 @@ export class ImagesController {
   }
 
 
-  
+
 
 
   // Get single image by UUID

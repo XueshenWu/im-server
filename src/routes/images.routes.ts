@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { imagesController } from '../controllers/images.controller';
 import { purgeController } from '../controllers/purge.controller';
 import { asyncHandler } from '../middleware/errorHandler';
-import { validateSync } from '../middleware/syncValidation';
+import { validateSync, validateLwwLock } from '../middleware/syncValidation';
 
 
 
@@ -506,7 +506,7 @@ router.get('/uuid/:uuid', validateSync, asyncHandler(imagesController.getByUuid)
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.patch('/replace', validateSync, asyncHandler(imagesController.replaceImages));
+router.patch('/replace', validateSync, validateLwwLock, asyncHandler(imagesController.replaceImages));
 
 
 
@@ -587,7 +587,7 @@ router.patch('/replace', validateSync, asyncHandler(imagesController.replaceImag
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.patch('/update/exif', validateSync, asyncHandler(imagesController.UpdateExifData));
+router.patch('/update/exif', validateSync, validateLwwLock, asyncHandler(imagesController.UpdateExifData));
 
 /**
  * @swagger
@@ -876,6 +876,6 @@ router.post('/requestDownloadUrls', validateSync, asyncHandler(imagesController.
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.post('/presignUrls', validateSync, asyncHandler(imagesController.presignURLs))
+router.post('/presignUrls', validateSync, validateLwwLock, asyncHandler(imagesController.presignURLs))
 
 export default router;

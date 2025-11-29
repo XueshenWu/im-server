@@ -38,3 +38,7 @@ docker-compose.yml
 # Test files
 src/test*.ts
 src/quick-test.ts
+node_modules
+dist
+.git
+.env

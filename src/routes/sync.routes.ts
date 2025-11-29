@@ -25,6 +25,68 @@ router.get('/lwwSyncMetadata', asyncHandler(syncController.getLWWMetadata.bind(s
 
 /**
  * @swagger
+ * /api/sync/lock/acquire:
+ *   post:
+ *     summary: Acquire LWW sync lock
+ *     tags: [Sync]
+ *     description: Acquire a lock for LWW sync operations. Lock expires after 60 seconds.
+ *     responses:
+ *       200:
+ *         description: Lock acquisition result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 lockUuid:
+ *                   type: string
+ *                   description: Lock UUID (only present if success is true)
+ *                 ttl:
+ *                   type: integer
+ *                   description: Lock TTL in seconds (only present if success is true)
+ *                 message:
+ *                   type: string
+ */
+router.post('/lock/acquire', asyncHandler(syncController.acquireLwwLock.bind(syncController)));
+
+/**
+ * @swagger
+ * /api/sync/lock/release:
+ *   post:
+ *     summary: Release LWW sync lock
+ *     tags: [Sync]
+ *     description: Release a previously acquired lock using the lock UUID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - lockUuid
+ *             properties:
+ *               lockUuid:
+ *                 type: string
+ *                 description: The lock UUID received from acquire
+ *     responses:
+ *       200:
+ *         description: Lock release result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ */
+router.post('/lock/release', asyncHandler(syncController.releaseLwwLock.bind(syncController)));
+
+/**
+ * @swagger
  * /api/sync/current:
  *   get:
  *     summary: Get current sync sequence

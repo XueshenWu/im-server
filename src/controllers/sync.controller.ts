@@ -7,6 +7,9 @@ import {
 import { AppError } from '../middleware/errorHandler';
 import { getClientId } from '../middleware/syncValidation';
 import { getImagesWithExif } from '../db/queries';
+import { redisClient } from '../config/redis';
+import {v4} from 'uuid'
+
 
 export class SyncController {
   /**
@@ -20,7 +23,7 @@ export class SyncController {
       success: true,
       data: {
         currentSequence,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(),
       },
     });
   }
@@ -37,6 +40,93 @@ export class SyncController {
       data: syncInfo,
     });
 
+  }
+
+
+  /**
+   * Acquire LWW sync lock
+   * POST /api/sync/lock/acquire
+   */
+  async acquireLwwLock(req: Request, res: Response) {
+    const lockKey = 'sync:lww:lock';
+    const lockTTL = 60; // 60 seconds
+
+    // Check if lock already exists
+    const existingLock = await redisClient.get(lockKey);
+
+    if (existingLock) {
+      res.json({
+        success: false,
+        message: 'Lock already acquired by another client',
+      });
+      return;
+    }
+
+    // Generate new lock UUID
+    const lockUuid = v4();
+
+    // Try to acquire lock atomically (SET with NX and EX)
+    const result = await redisClient.set(lockKey, lockUuid, 'EX', lockTTL, 'NX');
+
+    if (result === 'OK') {
+      res.json({
+        success: true,
+        lockUuid,
+        ttl: lockTTL,
+        message: 'Lock acquired successfully',
+      });
+    } else {
+      // Race condition: another client acquired the lock between our check and SET
+      res.json({
+        success: false,
+        message: 'Lock already acquired by another client',
+      });
+    }
+  }
+
+  /**
+   * Release LWW sync lock
+   * POST /api/sync/lock/release
+   * Body: { lockUuid: string }
+   */
+  async releaseLwwLock(req: Request, res: Response) {
+    const { lockUuid } = req.body;
+    const lockKey = 'sync:lww:lock';
+
+    if (!lockUuid) {
+      res.json({
+        success: false,
+        message: 'lockUuid is required',
+      });
+      return;
+    }
+
+    // Get current lock value
+    const currentLock = await redisClient.get(lockKey);
+
+    if (!currentLock) {
+      res.json({
+        success: false,
+        message: 'Lock not found',
+      });
+      return;
+    }
+
+    if (currentLock !== lockUuid) {
+      res.json({
+        success: false,
+        message: 'Lock UUID does not match',
+      });
+      return;
+    }
+
+    // Delete the lock
+    await redisClient.del(lockKey);
+
+    res.json({
+      success: true,
+      message: 'Lock released successfully',
+    });
   }
 
 
@@ -134,7 +224,7 @@ export class SyncController {
         operationsBehind,
         isInSync,
         needsSync: !isInSync,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(),
       },
     });
   }

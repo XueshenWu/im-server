@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { getCurrentSyncSequence } from '../utils/syncLogger';
 import { AppError } from './errorHandler';
 import logger from '../config/logger';
+import { redisClient } from '../config/redis';
 
 /**
  * Extended Request type with sync information
@@ -179,3 +180,59 @@ export function getClientId(req: Request): string | undefined {
   const syncReq = req as SyncRequest;
   return syncReq.sync?.clientId || req.header('X-Client-ID');
 }
+
+/**
+ * Middleware to validate LWW lock for protected operations
+ * Checks if a lock exists and validates the provided UUID
+ *
+ * Use this middleware for routes that modify metadata or generate presigned PUT URLs
+ */
+export const validateLwwLock = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const lockKey = 'sync:lww:lock';
+
+    // For read operations, no lock validation needed
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+      return next();
+    }
+
+    // Check if a lock exists
+    const existingLock = await redisClient.get(lockKey);
+
+    // No lock exists, allow operation
+    if (!existingLock) {
+      return next();
+    }
+
+    // Lock exists, validate the UUID from header
+    const providedLockUuid = req.header('X-Lock-UUID');
+
+    if (!providedLockUuid) {
+      throw new AppError(
+        'Lock is active. Please provide X-Lock-UUID header with your lock ID',
+        423 // 423 Locked status code
+      );
+    }
+
+    if (providedLockUuid !== existingLock) {
+      throw new AppError(
+        'Invalid lock UUID. The provided UUID does not match the active lock',
+        423
+      );
+    }
+
+    // Lock UUID is valid, allow operation
+    return next();
+  } catch (error) {
+    if (error instanceof AppError) {
+      return next(error);
+    }
+
+    logger.error('Lock validation error:', error);
+    return next(new AppError('Lock validation failed', 500));
+  }
+};
