@@ -371,7 +371,7 @@ router.get('/stats', validateSync, asyncHandler(imagesController.getStats));
  */
 router.get('/file/uuid/:uuid', asyncHandler(imagesController.getFileByUuid));
 
-
+router.get('/exif/uuid/:uuid', asyncHandler(imagesController.getExifByUUID));
 
 /**
  * @swagger

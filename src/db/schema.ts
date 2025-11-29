@@ -21,6 +21,12 @@ export const images = pgTable('images', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   status: statusEnum('status').default('pending').notNull(),
+  pageCount: integer('page_count').default(1).notNull(),
+  tiffDimensions: jsonb('tiff_dimensions').$type<{
+    width: number;
+    height: number;
+  }[]>()
+
 });
 
 // EXIF data table

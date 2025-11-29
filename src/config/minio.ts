@@ -15,14 +15,12 @@ const BUCKET_THUMBNAILS = process.env.MINIO_BUCKET_THUMBNAILS || 'thumbnails';
 
 // MIME type to file extension mapping
 const mimeToExtension: Record<string, string> = {
-    'image/jpeg': 'jpg',
-    'image/jpg': 'jpg',
+    'image/jpeg': 'jpeg',
+    'image/jpg': 'jpeg',
     'image/png': 'png',
-    'image/gif': 'gif',
     'image/webp': 'webp',
-    'image/tiff': 'tif',
-    'image/bmp': 'bmp',
-    'image/svg+xml': 'svg',
+    'image/tiff': 'tiff',
+
 };
 
 // Helper function to get file extension from MIME type
@@ -38,16 +36,16 @@ const getExtensionFromMimeType = (mimeType: string): string => {
 
 
 export const resolvePublicUrl = (internalUrl: string): string => {
-  // 1. In Production, we trust the URL is already correct (e.g. s3.myapp.com)
-  if (process.env.NODE_ENV !== 'development') {
-    return internalUrl;
-  }
+    // 1. In Production, we trust the URL is already correct (e.g. s3.myapp.com)
+    if (process.env.NODE_ENV !== 'development') {
+        return internalUrl;
+    }
 
-  // 2. In Development, rewrite Docker network paths to Nginx Localhost
-  // We handle both 'minio' (docker service name) and 'localhost' (direct access)
-  return internalUrl
-    .replace('minio:9000', 'localhost:9999/storage')
-    .replace('localhost:9000', 'localhost:9999/storage');
+    // 2. In Development, rewrite Docker network paths to Nginx Localhost
+    // We handle both 'minio' (docker service name) and 'localhost' (direct access)
+    return internalUrl
+        .replace('minio:9000', 'localhost:9999/storage')
+        .replace('localhost:9000', 'localhost:9999/storage');
 };
 
 /**
@@ -60,6 +58,7 @@ export const generatePresignedUrl = async (
 
     const extension = getExtensionFromMimeType(mimeType);
     const objectName = `${uuid}.${extension}`;
+    const thumbnailObjectName = `${uuid}.jpeg`;
 
 
     // We use presignedUrl (generic) instead of presignedPutObject
@@ -76,7 +75,7 @@ export const generatePresignedUrl = async (
     const thumbnailUrl = await minioClient.presignedUrl(
         'PUT',
         BUCKET_THUMBNAILS,
-        objectName,
+        thumbnailObjectName,
         15 * 60, // 15 mins
         {
             'Content-Type': 'image/jpeg'
@@ -96,24 +95,24 @@ export const generatePresignedUrl = async (
     };
 };
 
-/**
- * 2. For SERVER: Upload a generated thumbnail directly
- */
-export const uploadThumbnail = async (filename: string, buffer: Buffer) => {
-    // Upload buffer to THUMBNAILS bucket
-    // 'metaData' is optional, but setting Content-Type is good practice
-    const metaData = { 'Content-Type': 'image/jpeg' };
+// /**
+//  * 2. For SERVER: Upload a generated thumbnail directly
+//  */
+// export const uploadThumbnail = async (filename: string, buffer: Buffer) => {
+//     // Upload buffer to THUMBNAILS bucket
+//     // 'metaData' is optional, but setting Content-Type is good practice
+//     const metaData = { 'Content-Type': 'image/jpeg' };
 
-    await minioClient.putObject(
-        BUCKET_THUMBNAILS,
-        filename,
-        buffer,
-        buffer.length,
-        metaData
-    );
+//     await minioClient.putObject(
+//         BUCKET_THUMBNAILS,
+//         filename,
+//         buffer,
+//         buffer.length,
+//         metaData
+//     );
 
-    return { bucketName: BUCKET_THUMBNAILS, filename };
-};
+//     return { bucketName: BUCKET_THUMBNAILS, filename };
+// };
 
 /**
  * 3. Generate presigned GET URL for downloading an image (requires authentication)
@@ -140,7 +139,7 @@ export const generatePresignedGetUrl = async (
  * Note: This assumes the thumbnails bucket has a public read policy
  */
 export const generateThumbnailPublicUrl = (uuid: string) => {
-    const objectName = `${uuid}.jpg`; // Thumbnails are always JPG
+    const objectName = `${uuid}.jpeg`; // Thumbnails are always JPEG
     const endpoint = process.env.MINIO_ENDPOINT || 'localhost';
     const port = process.env.MINIO_PORT || '9000';
     const useSSL = process.env.MINIO_USE_SSL === 'true';
@@ -164,15 +163,15 @@ export const getImageStream = async (uuid: string, format: string) => {
     return stream;
 };
 
-/**
- * 6. Stream thumbnail from MinIO
- */
-export const getThumbnailStream = async (uuid: string) => {
-    const objectName = `${uuid}.jpg`; // Thumbnails are always JPG
+// /**
+//  * 6. Stream thumbnail from MinIO
+//  */
+// export const getThumbnailStream = async (uuid: string) => {
+//     const objectName = `${uuid}.jpg`; // Thumbnails are always JPG
 
-    const stream = await minioClient.getObject(BUCKET_THUMBNAILS, objectName);
+//     const stream = await minioClient.getObject(BUCKET_THUMBNAILS, objectName);
 
-    return stream;
-};
+//     return stream;
+// };
 
 export default minioClient;

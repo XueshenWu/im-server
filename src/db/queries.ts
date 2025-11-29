@@ -1,6 +1,7 @@
 import { eq, desc, sql, and, isNull, inArray } from 'drizzle-orm';
 import { db } from './index';
 import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyncLog, Image, NewImageWithExif } from './schema';
+import { uuid } from 'drizzle-orm/pg-core';
 
 // ============================================================
 // IMAGE QUERIES
@@ -80,12 +81,14 @@ export async function getImagesSinceSequence(sinceSequence: number) {
  * Get images with EXIF data
  */
 export async function getImagesWithExif() {
-  return await db
+  const res = await db
     .select()
     .from(images)
     .leftJoin(exifData, eq(images.uuid, exifData.uuid))
     .where(isVisibleImage())
     .orderBy(desc(images.createdAt));
+
+  return res;
 }
 
 /**
@@ -124,6 +127,17 @@ export async function getImagesByUuids(uuids: string[]) {
     .select()
     .from(images)
     .where(and(inArray(images.uuid, uuids), isVisibleImage()))
+    .orderBy(desc(images.createdAt));
+}
+
+
+export async function getImageExifDataByUuids(uuids: string[]) {
+  if (uuids.length === 0) return [];
+
+  return await db
+    .select()
+    .from(exifData)
+    .where(and(inArray(exifData.uuid, uuids), isVisibleImage()))
     .orderBy(desc(images.createdAt));
 }
 
@@ -301,6 +315,16 @@ export async function getExifByImageUUID(uuid: string) {
   return result[0] || null;
 }
 
+export async function getExifByImageUUIDs(uuids: string[]) {
+  if (uuids.length === 0) return [];
+
+  return await db
+    .select()
+    .from(exifData)
+    .where(inArray(exifData.uuid, uuids))
+    .orderBy(desc(images.createdAt));
+}
+
 /**
  * Create EXIF data
  */
@@ -325,14 +349,14 @@ export async function updateExifData(uuid: string, exif: Partial<NewExifData>) {
 
   const updatedExif = result[0];
   if (!updatedExif) return null;
-  
+
   await db
-  .update(images)
-  .set({
+    .update(images)
+    .set({
       updatedAt: new Date(),
     })
-  .where(eq(images.uuid, uuid))
-  
+    .where(eq(images.uuid, uuid))
+
 
   return result[0] || null;
 }
@@ -435,8 +459,8 @@ export async function createImageWithExif(
 
   if (exifDataInput) {
     const exif = await createExifData({
-      ...exifDataInput,
       uuid: newImage.uuid,
+      ...sanitizeExifData(exifDataInput),
     });
 
     return {
@@ -453,47 +477,95 @@ export async function createImageWithExif(
 
 
 
-export async function insertPendingImages(newImages:NewImageWithExif[]){
-    // Check for existing images by UUID
-    const uuids = newImages.map(img => img.uuid).filter((uuid): uuid is string => uuid !== null && uuid !== undefined);
+/**
+ * Helper: Sanitize EXIF data to ensure proper types for database insertion
+ */
+function sanitizeExifData(exif: any): Omit<NewExifData, 'id' | 'uuid'> {
+  const sanitized: any = {};
 
-    if (uuids.length > 0) {
-        const existingImages = await db
-            .select({ uuid: images.uuid })
-            .from(images)
-            .where(and(
-                inArray(images.uuid, uuids),
-                isNull(images.deletedAt)
-            ));
+  // String fields
+  if (exif.cameraMake !== undefined) sanitized.cameraMake = String(exif.cameraMake);
+  if (exif.cameraModel !== undefined) sanitized.cameraModel = String(exif.cameraModel);
+  if (exif.lensModel !== undefined) sanitized.lensModel = String(exif.lensModel);
+  if (exif.artist !== undefined) sanitized.artist = String(exif.artist);
+  if (exif.copyright !== undefined) sanitized.copyright = String(exif.copyright);
+  if (exif.software !== undefined) sanitized.software = String(exif.software);
+  if (exif.shutterSpeed !== undefined) sanitized.shutterSpeed = String(exif.shutterSpeed);
+  if (exif.aperture !== undefined) sanitized.aperture = String(exif.aperture);
+  if (exif.focalLength !== undefined) sanitized.focalLength = String(exif.focalLength);
 
-        if (existingImages.length > 0) {
-            const existingUuids = existingImages.map(img => img.uuid);
-            throw new Error(`Images with the following UUIDs already exist: ${existingUuids.join(', ')}`);
-        }
+  // Integer fields
+  if (exif.iso !== undefined) {
+    const iso = parseInt(String(exif.iso), 10);
+    if (!isNaN(iso)) sanitized.iso = iso;
+  }
+  if (exif.orientation !== undefined) {
+    const orientation = parseInt(String(exif.orientation), 10);
+    if (!isNaN(orientation)) sanitized.orientation = orientation;
+  }
+
+  // Decimal fields
+  if (exif.gpsLatitude !== undefined) sanitized.gpsLatitude = String(exif.gpsLatitude);
+  if (exif.gpsLongitude !== undefined) sanitized.gpsLongitude = String(exif.gpsLongitude);
+  if (exif.gpsAltitude !== undefined) sanitized.gpsAltitude = String(exif.gpsAltitude);
+
+  // Timestamp fields
+  if (exif.dateTaken !== undefined) {
+    if (exif.dateTaken instanceof Date) {
+      sanitized.dateTaken = exif.dateTaken;
+    } else if (typeof exif.dateTaken === 'string') {
+      const date = new Date(exif.dateTaken);
+      if (!isNaN(date.getTime())) sanitized.dateTaken = date;
     }
+  }
 
-    // Insert images
-    await db.insert(images).values(newImages.map(newImage => {
-        const { exifData, ...imageData } = newImage;
-        return {
-            status: 'pending',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            ...imageData
-        } as NewImage;
-    }));
+  // JSONB extra field
+  if (exif.extra !== undefined) sanitized.extra = exif.extra;
 
-    // Insert EXIF data for images that have it
-    const exifRecords = newImages
-        .filter(img => img.exifData && img.uuid)
-        .map(img => ({
-            uuid: img.uuid!,
-            ...img.exifData
-        } as NewExifData));
+  return sanitized;
+}
 
-    if (exifRecords.length > 0) {
-        await db.insert(exifData).values(exifRecords);
+export async function insertPendingImages(newImages: NewImageWithExif[]) {
+  // Check for existing images by UUID
+  const uuids = newImages.map(img => img.uuid).filter((uuid): uuid is string => uuid !== null && uuid !== undefined);
+
+  if (uuids.length > 0) {
+    const existingImages = await db
+      .select({ uuid: images.uuid })
+      .from(images)
+      .where(and(
+        inArray(images.uuid, uuids),
+        isNull(images.deletedAt)
+      ));
+
+    if (existingImages.length > 0) {
+      const existingUuids = existingImages.map(img => img.uuid);
+      throw new Error(`Images with the following UUIDs already exist: ${existingUuids.join(', ')}`);
     }
+  }
+
+  // Insert images
+  await db.insert(images).values(newImages.map(newImage => {
+    const { exifData, ...imageData } = newImage;
+    return {
+      status: 'pending',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...imageData
+    } as NewImage;
+  }));
+
+  // Insert EXIF data for images that have it
+  const exifRecords = newImages
+    .filter(img => img.exifData && img.uuid)
+    .map(img => ({
+      uuid: img.uuid!,
+      ...sanitizeExifData(img.exifData!)
+    } as NewExifData));
+
+  if (exifRecords.length > 0) {
+    await db.insert(exifData).values(exifRecords);
+  }
 }
 
 
@@ -517,11 +589,11 @@ export async function replaceImageByUuid(
   // Remove fields that shouldn't be in imageData or need special handling
   const { status, updatedAt, deletedAt, ...cleanImageData } = imageData;
   console.log('clean data: ', JSON.stringify({
-      ...cleanImageData,
-      updatedAt: new Date(),
-      status: 'pending',
-      deletedAt: null,
-    }))
+    ...cleanImageData,
+    updatedAt: new Date(),
+    status: 'pending',
+    deletedAt: null,
+  }))
   const updatedImage = await db
     .update(images)
     .set({
@@ -536,10 +608,11 @@ export async function replaceImageByUuid(
   // Handle EXIF data
   if (exifDataInput) {
     const existingExif = await getExifByImageUUID(existingImage.uuid);
+    const sanitizedExif = sanitizeExifData(exifDataInput);
 
     if (existingExif) {
       // Update existing EXIF data
-      const updatedExif = await updateExifData(existingImage.uuid, exifDataInput);
+      const updatedExif = await updateExifData(existingImage.uuid, sanitizedExif);
       return {
         ...updatedImage[0],
         exifData: updatedExif,
@@ -547,8 +620,8 @@ export async function replaceImageByUuid(
     } else {
       // Create new EXIF data
       const newExif = await createExifData({
-        ...exifDataInput,
         uuid: existingImage.uuid,
+        ...sanitizedExif,
       });
       return {
         ...updatedImage[0],

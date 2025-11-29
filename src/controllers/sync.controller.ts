@@ -6,6 +6,7 @@ import {
 } from '../utils/syncLogger';
 import { AppError } from '../middleware/errorHandler';
 import { getClientId } from '../middleware/syncValidation';
+import { getImagesWithExif } from '../db/queries';
 
 export class SyncController {
   /**
@@ -23,6 +24,24 @@ export class SyncController {
       },
     });
   }
+
+
+
+
+
+
+  async getLWWMetadata(req: Request, res: Response) {
+    const syncInfo = await getImagesWithExif();
+    res.json({
+      success: true,
+      data: syncInfo,
+    });
+
+  }
+
+
+
+
 
   /**
    * Get operations since a specific sequence

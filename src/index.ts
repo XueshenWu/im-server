@@ -21,6 +21,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow cross-origin images
   crossOriginEmbedderPolicy: false, // Disable for Electron compatibility
+  contentSecurityPolicy: false, // Disabled for now - TODO: re-enable with proper configuration
 }));
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',

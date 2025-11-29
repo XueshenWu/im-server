@@ -4,6 +4,25 @@ import { asyncHandler } from '../middleware/errorHandler';
 
 const router = Router();
 
+
+
+
+
+/**
+ * @swagger
+ * /api/sync/lwwSyncMetadata:
+ *   get:
+ *     summary: Get current cloud data for lww diff
+ *     tags: [Sync]
+ *     responses:
+ *       200:
+ *         description: Current sync sequence
+ */
+
+
+
+router.get('/lwwSyncMetadata', asyncHandler(syncController.getLWWMetadata.bind(syncController)))
+
 /**
  * @swagger
  * /api/sync/current:

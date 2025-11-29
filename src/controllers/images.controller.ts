@@ -29,7 +29,8 @@ import {
 } from '../utils/syncLogger';
 import { getClientId } from '../middleware/syncValidation';
 import { Image, NewImage } from '../db/schema';
-import { generatePresignedUrl, generatePresignedGetUrl, getThumbnailStream } from '../config/minio';
+import { generatePresignedUrl, generatePresignedGetUrl } from '../config/minio';
+import { db } from '../db';
 
 /**
  * Sanitize EXIF data from user input
@@ -121,6 +122,24 @@ export class ImagesController {
       data: metadata,
     });
   }
+
+
+  async getExifByUUID(req: Request, res: Response) {
+    const { uuid } = req.params;
+    const exif = await getExifByImageUUID(uuid);
+
+    if (!exif) {
+      throw new AppError('EXIF data not found', 404);
+    }
+
+    res.json({
+      success: true,
+      data: exif,
+    });
+  }
+
+
+  
 
 
   // Get single image by UUID
@@ -733,6 +752,8 @@ export class ImagesController {
           isCorrupted: image.isCorrupted,
           createdAt: image.createdAt,
           updatedAt: image.updatedAt,
+          pageCount: image.pageCount,
+          tiffDimensions: image.tiffDimensions,
         },
       },
     });
@@ -777,7 +798,7 @@ export class ImagesController {
 
     for (const replacement of replacements) {
       try {
-        const { uuid, filename, format, mimeType, width, height, fileSize, hash, exifData: rawExifData } = replacement;
+        const { uuid, filename, format, mimeType, width, height, fileSize, hash, pageCount, tiffDimensions, exifData: rawExifData } = replacement;
 
         // Check if image exists
         const existingImage = await getImageByUuid(uuid);
@@ -807,6 +828,9 @@ export class ImagesController {
           height: height || null,
           fileSize: fileSize || null,
           hash: hash || null,
+          pageCount: pageCount || null,
+          tiffDimensions: tiffDimensions || null,
+          isCorrupted: false,
         };
 
         // Sanitize EXIF data if provided
