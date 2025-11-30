@@ -42,6 +42,7 @@ app.use(cors({
     'X-Image-Updated-At',
     'X-Image-Is-Corrupted',
     'X-Current-Sequence',
+    'X-Current-Sync-UUID',
     'X-Client-Sequence',
     'X-Operations-Behind',
   ],

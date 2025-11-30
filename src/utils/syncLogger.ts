@@ -59,22 +59,28 @@ export interface SyncLogMetadata {
 }
 
 /**
- * Get the current maximum sync sequence number
+ * Get the current maximum sync sequence number and its UUID
  */
-export async function getCurrentSyncSequence(): Promise<number> {
-  if (!SYNC_ENABLED) return 0;
+export async function getCurrentSyncSequence(): Promise<{ sequence: number; syncUUID: string | null }> {
+  if (!SYNC_ENABLED) return { sequence: 0, syncUUID: null };
 
   try {
     const result = await db
-      .select({ syncSequence: syncLog.syncSequence })
+      .select({
+        syncSequence: syncLog.syncSequence,
+        syncUUID: syncLog.syncUUID
+      })
       .from(syncLog)
       .orderBy(desc(syncLog.syncSequence))
       .limit(1);
 
-    return result[0]?.syncSequence || 0;
+    return {
+      sequence: result[0]?.syncSequence || 0,
+      syncUUID: result[0]?.syncUUID || null
+    };
   } catch (error) {
     logger.warn('Sync system not available (migration may not be applied). Set SYNC_ENABLED=false to disable sync logging.');
-    return 0;
+    return { sequence: 0, syncUUID: null };
   }
 }
 
@@ -88,10 +94,10 @@ export async function createSyncLogEntry(params: {
   groupOperationId?: number | null;
   status?: SyncStatus;
   metadata?: SyncLogMetadata;
-}): Promise<{ id: number; syncSequence: number }> {
+}): Promise<{ id: number; syncSequence: number; syncUUID: string }> {
   // Return dummy value if sync is disabled
   if (!SYNC_ENABLED) {
-    return { id: 0, syncSequence: 0 };
+    return { id: 0, syncSequence: 0, syncUUID: '' };
   }
 
   const {
@@ -115,10 +121,10 @@ export async function createSyncLogEntry(params: {
         metadata: metadata as any,
         createdAt: new Date(),
       })
-      .returning({ id: syncLog.id, syncSequence: syncLog.syncSequence });
+      .returning({ id: syncLog.id, syncSequence: syncLog.syncSequence, syncUUID: syncLog.syncUUID });
 
     logger.info(
-      `Sync log created: seq=${result[0].syncSequence}, operation=${operation}, imageId=${imageId}, clientId=${clientId}`
+      `Sync log created: seq=${result[0].syncSequence}, uuid=${result[0].syncUUID}, operation=${operation}, imageId=${imageId}, clientId=${clientId}`
     );
 
     return result[0];
@@ -198,7 +204,7 @@ export async function createBatchOperation(params: {
   clientId?: string;
   totalCount: number;
   metadata?: SyncLogMetadata;
-}): Promise<{ id: number; syncSequence: number }> {
+}): Promise<{ id: number; syncSequence: number; syncUUID: string }> {
   const { operation, clientId, totalCount, metadata = {} } = params;
 
   const batchMetadata: SyncLogMetadata = {
@@ -270,7 +276,7 @@ export async function logSuccessfulOperation(params: {
   clientId?: string;
   groupOperationId?: number;
   metadata?: SyncLogMetadata;
-}): Promise<{ id: number; syncSequence: number }> {
+}): Promise<{ id: number; syncSequence: number; syncUUID: string }> {
   return await createSyncLogEntry({
     ...params,
     status: 'completed',
@@ -287,7 +293,7 @@ export async function logFailedOperation(params: {
   groupOperationId?: number;
   errorMessage: string;
   metadata?: SyncLogMetadata;
-}): Promise<{ id: number; syncSequence: number }> {
+}): Promise<{ id: number; syncSequence: number; syncUUID: string }> {
   const { errorMessage, ...rest } = params;
 
   return await createSyncLogEntry({

@@ -3,6 +3,7 @@ import {
   getCurrentSyncSequence,
   getSyncOperationsSince,
   getSyncOperationsByClient,
+  createSyncLogEntry,
 } from '../utils/syncLogger';
 import { AppError } from '../middleware/errorHandler';
 import { getClientId } from '../middleware/syncValidation';
@@ -17,12 +18,13 @@ export class SyncController {
    * GET /api/sync/current
    */
   async getCurrentSequence(req: Request, res: Response) {
-    const currentSequence = await getCurrentSyncSequence();
+    const { sequence, syncUUID } = await getCurrentSyncSequence();
 
     res.json({
       success: true,
       data: {
-        currentSequence,
+        currentSequence: sequence,
+        currentSyncUUID: syncUUID,
         timestamp: new Date(),
       },
     });
@@ -34,7 +36,7 @@ export class SyncController {
 
 
   async getLWWMetadata(req: Request, res: Response) {
-    const syncInfo = await getImagesWithExif();
+    const syncInfo = await getImagesWithExif(true);
     res.json({
       success: true,
       data: syncInfo,
@@ -123,9 +125,30 @@ export class SyncController {
     // Delete the lock
     await redisClient.del(lockKey);
 
+    // Log the lock release operation in sync_log
+    const clientId = getClientId(req);
+
+    // Create a sync log entry for lock release
+    const syncEntry = await createSyncLogEntry({
+      operation: 'update',
+      imageId: null, // No specific image for lock release
+      clientId,
+      status: 'completed',
+      metadata: {
+        lock_operation: 'release',
+        lock_uuid: lockUuid,
+      },
+    });
+
+    // Set sync info in response headers
+    res.setHeader('X-Current-Sequence', syncEntry.syncSequence.toString());
+    res.setHeader('X-Current-Sync-UUID', syncEntry.syncUUID);
+
     res.json({
       success: true,
       message: 'Lock released successfully',
+      syncSequence: syncEntry.syncSequence,
+      syncUUID: syncEntry.syncUUID,
     });
   }
 
@@ -150,7 +173,7 @@ export class SyncController {
     }
 
     const operations = await getSyncOperationsSince(sinceSequence, limit);
-    const currentSequence = await getCurrentSyncSequence();
+    const { sequence: currentSequence, syncUUID: currentSyncUUID } = await getCurrentSyncSequence();
 
     res.json({
       success: true,
@@ -159,8 +182,10 @@ export class SyncController {
       sync: {
         requestedSince: sinceSequence,
         currentSequence,
+        currentSyncUUID,
         hasMore: operations.length === limit,
         nextSince: operations.length > 0 ? operations[operations.length - 1].syncSequence : sinceSequence,
+        nextSyncUUID: operations.length > 0 ? operations[operations.length - 1].syncUUID : null,
       },
     });
   }
@@ -183,7 +208,7 @@ export class SyncController {
     }
 
     const operations = await getSyncOperationsByClient(clientId, limit);
-    const currentSequence = await getCurrentSyncSequence();
+    const { sequence: currentSequence, syncUUID: currentSyncUUID } = await getCurrentSyncSequence();
 
     res.json({
       success: true,
@@ -192,6 +217,7 @@ export class SyncController {
       sync: {
         clientId,
         currentSequence,
+        currentSyncUUID,
       },
     });
   }
@@ -205,7 +231,9 @@ export class SyncController {
     const lastSyncSequenceHeader = req.header('X-Last-Sync-Sequence');
     const lastSyncSequence = lastSyncSequenceHeader ? parseInt(lastSyncSequenceHeader) : undefined;
 
-    const currentSequence = await getCurrentSyncSequence();
+    const syncInfo = await getCurrentSyncSequence();
+    const currentSequence = syncInfo.sequence;
+    const currentSyncUUID = syncInfo.syncUUID;
 
     let operationsBehind = 0;
     let isInSync = true;
@@ -215,10 +243,17 @@ export class SyncController {
       isInSync = operationsBehind === 0;
     }
 
+    // Set sync info in response headers
+    res.setHeader('X-Current-Sequence', currentSequence.toString());
+    if (currentSyncUUID) {
+      res.setHeader('X-Current-Sync-UUID', currentSyncUUID);
+    }
+
     res.json({
       success: true,
       data: {
         currentSequence,
+        currentSyncUUID,
         clientId: clientId || null,
         lastSyncSequence: lastSyncSequence || null,
         operationsBehind,

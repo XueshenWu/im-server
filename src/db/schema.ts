@@ -25,7 +25,7 @@ export const images = pgTable('images', {
   tiffDimensions: jsonb('tiff_dimensions').$type<{
     width: number;
     height: number;
-  }[]>()
+  }[]>().default([]),
 
 });
 
@@ -92,6 +92,7 @@ export const exifData = pgTable('exif_data', {
 export const syncLog = pgTable('sync_log', {
   id: serial('id').primaryKey(),
   syncSequence: bigserial('sync_sequence', { mode: 'number' }).notNull().unique(),
+  syncUUID: uuid('sync_uuid').defaultRandom().unique().notNull(),
   operation: varchar('operation', { length: 20 }).notNull(), // upload, download, update, delete, conflict, batch_upload, batch_delete, batch_update, replace
   imageId: integer('image_id').references(() => images.id, { onDelete: 'set null' }),
   clientId: varchar('client_id', { length: 100 }),

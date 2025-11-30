@@ -15,6 +15,9 @@ const isVisibleImage = () => and(
   eq(images.status, 'processed'),
 );
 
+const isProcessedImage = () => eq(images.status, 'processed');
+
+
 /**
  * Get all images (non-deleted, processed only)
  */
@@ -80,12 +83,12 @@ export async function getImagesSinceSequence(sinceSequence: number) {
 /**
  * Get images with EXIF data
  */
-export async function getImagesWithExif() {
+export async function getImagesWithExif(findAll: boolean = false) {
   const res = await db
     .select()
     .from(images)
     .leftJoin(exifData, eq(images.uuid, exifData.uuid))
-    .where(isVisibleImage())
+    .where(findAll ? isProcessedImage() : isVisibleImage())
     .orderBy(desc(images.createdAt));
 
   return res;
@@ -544,16 +547,46 @@ export async function insertPendingImages(newImages: NewImageWithExif[]) {
     }
   }
 
-  // Insert images
   await db.insert(images).values(newImages.map(newImage => {
-    const { exifData,createdAt,updatedAt, deletedAt, ...imageData } = newImage;
-    return {
+    // Destructure to separate Image fields from others
+    const {
+      exifData,
+      createdAt,
+      updatedAt,
+      deletedAt,
+      tiffDimensions, // Destructure this out
+      ...imageData
+    } = newImage;
+
+    // 1. Create the base record with strict typing (No 'any'!)
+    // We only include fields that are ALWAYS present or have defaults we want to override
+    const imageRecord: NewImage = {
+      uuid: imageData.uuid,
+      filename: imageData.filename,
+      fileSize: imageData.fileSize,
+      format: imageData.format,
+      hash: imageData.hash,
       status: 'pending',
+      // Drizzle handles defaultNow(), but explicitly setting new Date() is fine too
       createdAt: new Date(),
       updatedAt: new Date(),
-      deletedAt: null,
-      ...imageData
-    } as NewImage;
+      pageCount: imageData.pageCount ?? 1,
+      // Boolean conversion handles the 0/1 to false/true issue
+      isCorrupted: Boolean(imageData.isCorrupted),
+    };
+
+    // 2. Conditionally add optional fields
+    // Drizzle will ignore keys that are undefined/missing, triggering the DB DEFAULT
+    if (imageData.width != null) imageRecord.width = imageData.width;
+    if (imageData.height != null) imageRecord.height = imageData.height;
+    if (imageData.mimeType) imageRecord.mimeType = imageData.mimeType;
+
+    // Only attach tiffDimensions if it actually exists (not null/undefined)
+    if (tiffDimensions) {
+      imageRecord.tiffDimensions = tiffDimensions;
+    }
+
+    return imageRecord;
   }));
 
   // Insert EXIF data for images that have it

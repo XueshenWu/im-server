@@ -68,13 +68,14 @@ export class ImagesController {
       images = await getAllImages();
     }
 
-    const currentSequence = await getCurrentSyncSequence();
+    const { sequence: currentSequence, syncUUID: currentSyncUUID } = await getCurrentSyncSequence();
 
     res.json({
       success: true,
       count: images.length,
       data: images,
       currentSequence,
+      currentSyncUUID,
       hasMore: false, // For full sync this is always false; could be enhanced with pagination
     });
   }
@@ -106,7 +107,7 @@ export class ImagesController {
       images = await getAllImages();
     }
 
-    const currentSequence = await getCurrentSyncSequence();
+    const { sequence: currentSequence, syncUUID: currentSyncUUID } = await getCurrentSyncSequence();
 
     // Return only minimal metadata for efficient comparison
     const metadata = images.map(img => ({
@@ -120,6 +121,7 @@ export class ImagesController {
       success: true,
       count: metadata.length,
       currentSequence,
+      currentSyncUUID,
       data: metadata,
     });
   }

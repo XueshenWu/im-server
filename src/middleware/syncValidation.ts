@@ -12,6 +12,7 @@ export interface SyncRequest extends Request {
     clientId?: string;
     lastSyncSequence?: number;
     currentSequence: number;
+    currentSyncUUID: string | null;
     isInSync: boolean;
   };
 }
@@ -34,13 +35,14 @@ export const validateSync = async (
     const lastSyncSequence = lastSyncSequenceHeader ? parseInt(lastSyncSequenceHeader) : undefined;
 
     // Get current server sequence
-    const currentSequence = await getCurrentSyncSequence();
+    const { sequence: currentSequence, syncUUID: currentSyncUUID } = await getCurrentSyncSequence();
 
     // Attach sync info to request for use in controllers
     syncReq.sync = {
       clientId,
       lastSyncSequence,
       currentSequence,
+      currentSyncUUID,
       isInSync: false,
     };
 
@@ -106,12 +108,18 @@ export const validateSync = async (
       // - Write operations: sequence AFTER the operation is logged
       // - Read operations: current server sequence (for cloud mode sync)
       try {
-        const finalSequence = await getCurrentSyncSequence();
+        const { sequence: finalSequence, syncUUID: finalSyncUUID } = await getCurrentSyncSequence();
         res.setHeader('X-Current-Sequence', finalSequence.toString());
+        if (finalSyncUUID) {
+          res.setHeader('X-Current-Sync-UUID', finalSyncUUID);
+        }
       } catch (err) {
         logger.error('Failed to get final sequence:', err);
         // Fallback to sequence from before operation if query fails
         res.setHeader('X-Current-Sequence', currentSequence.toString());
+        if (currentSyncUUID) {
+          res.setHeader('X-Current-Sync-UUID', currentSyncUUID);
+        }
       }
 
       return originalJson(body);
