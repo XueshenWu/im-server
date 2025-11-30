@@ -1,4 +1,4 @@
-import { eq, desc, sql, and, isNull, inArray } from 'drizzle-orm';
+import { eq, desc, sql, and, isNull, inArray, or, isNotNull } from 'drizzle-orm';
 import { db } from './index';
 import { images, exifData, syncLog, type NewImage, type NewExifData, type NewSyncLog, Image, NewImageWithExif } from './schema';
 import { uuid } from 'drizzle-orm/pg-core';
@@ -533,17 +533,43 @@ export async function insertPendingImages(newImages: NewImageWithExif[]) {
   const uuids = newImages.map(img => img.uuid).filter((uuid): uuid is string => uuid !== null && uuid !== undefined);
 
   if (uuids.length > 0) {
-    const existingImages = await db
+    // Find existing images that are either pending or deleted
+    const imagesToDelete = await db
+      .select({ id: images.id, uuid: images.uuid })
+      .from(images)
+      .where(and(
+        inArray(images.uuid, uuids),
+        or(
+          eq(images.status, 'pending'),
+          isNotNull(images.deletedAt)
+        )
+      ));
+
+    // Delete the existing pending or deleted images and their EXIF data
+    if (imagesToDelete.length > 0) {
+      const uuidsToDelete = imagesToDelete.map(img => img.uuid);
+      const idsToDelete = imagesToDelete.map(img => img.id);
+
+      // Delete EXIF data first (foreign key relationship)
+      await db.delete(exifData).where(inArray(exifData.uuid, uuidsToDelete));
+
+      // Then delete the images
+      await db.delete(images).where(inArray(images.id, idsToDelete));
+    }
+
+    // Check if there are any remaining non-pending, non-deleted images with the same UUIDs
+    const remainingImages = await db
       .select({ uuid: images.uuid })
       .from(images)
       .where(and(
         inArray(images.uuid, uuids),
-        isNull(images.deletedAt)
+        isNull(images.deletedAt),
+        eq(images.status, 'processed')
       ));
 
-    if (existingImages.length > 0) {
-      const existingUuids = existingImages.map(img => img.uuid);
-      throw new Error(`Images with the following UUIDs already exist: ${existingUuids.join(', ')}`);
+    if (remainingImages.length > 0) {
+      const existingUuids = remainingImages.map(img => img.uuid);
+      throw new Error(`Images with the following UUIDs already exist and are processed: ${existingUuids.join(', ')}`);
     }
   }
 

@@ -9,6 +9,9 @@ services:
     ports:
       - "3000:3000" # Optional: Keep this if you want to test directly, but Nginx handles it now
     environment:
+      # Base Domain Configuration
+      - BASE_DOMAIN=${BASE_DOMAIN:-192.168.0.24.nip.io}
+      - PUBLIC_PORT=${PUBLIC_PORT:-9999}
 
       - REDIS_HOST=redis
 
@@ -26,7 +29,9 @@ services:
       - MINIO_ACCESS_KEY=admin
       - MINIO_SECRET_KEY=password
 
-      - PUBLIC_MINIO_URL=http://s3.192.168.0.24.nip.io:9999
+      - PUBLIC_MINIO_ENDPOINT=s3.${BASE_DOMAIN:-192.168.0.24.nip.io}
+      - PUBLIC_MINIO_PORT=${PUBLIC_PORT:-9999}
+      - PUBLIC_MINIO_URL=http://s3.${BASE_DOMAIN:-192.168.0.24.nip.io}:${PUBLIC_PORT:-9999}
 
 
 
@@ -91,10 +96,9 @@ services:
       MINIO_ROOT_USER: "admin"
       MINIO_ROOT_PASSWORD: "password"
 
-      # 👇 UPDATE THESE TWO LINES
-      # We add the port :9999 to the public URL
-      MINIO_SERVER_URL: "http://s3.192.168.0.24.nip.io:9999"
-      MINIO_BROWSER_REDIRECT_URL: "http://console.192.168.0.24.nip.io:9999"
+      # Public URLs using centralized domain configuration
+      MINIO_SERVER_URL: "http://s3.${BASE_DOMAIN:-192.168.0.24.nip.io}:${PUBLIC_PORT:-9999}"
+      MINIO_BROWSER_REDIRECT_URL: "http://console.${BASE_DOMAIN:-192.168.0.24.nip.io}:${PUBLIC_PORT:-9999}"
 
       MINIO_NOTIFY_WEBHOOK_ENABLE_primary: "on"
       MINIO_NOTIFY_WEBHOOK_ENDPOINT_primary: "http://host.docker.internal:3000/webhook/minio"
@@ -114,9 +118,11 @@ services:
     image: nginx:alpine
     container_name: image-mgmt-nginx
     ports:
-      - "9999:80" # Map Host 9999 -> Container 80
+      - "${PUBLIC_PORT:-9999}:80" # Map configurable public port to container 80
+    environment:
+      - BASE_DOMAIN=${BASE_DOMAIN:-192.168.0.24.nip.io}
     volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     # CRITICAL: Allow Nginx to talk to your host machine (Node.js)
     extra_hosts:
       - "host.docker.internal:host-gateway"

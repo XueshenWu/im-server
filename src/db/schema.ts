@@ -1,4 +1,4 @@
-import { pgEnum, pgTable, serial, varchar, text, bigint, integer, boolean, timestamp, decimal, jsonb, uuid, bigserial } from 'drizzle-orm/pg-core';
+import { pgEnum, pgTable, serial, varchar, text, bigint, integer, boolean, timestamp, decimal, jsonb, uuid, bigserial, unique } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 export const statusEnum = pgEnum('image_status', ['pending', 'processed', 'failed']);
@@ -8,7 +8,7 @@ export const statusEnum = pgEnum('image_status', ['pending', 'processed', 'faile
 // Thumbnails stored as: /storage/thumbnails/{uuid}.{format}
 export const images = pgTable('images', {
   id: serial('id').primaryKey(),
-  uuid: uuid('uuid').defaultRandom().unique().notNull(),
+  uuid: uuid('uuid').defaultRandom().notNull(),
   filename: varchar('filename', { length: 255 }).notNull(), // Display name for user
   fileSize: bigint('file_size', { mode: 'number' }).notNull(),
   format: varchar('format', { length: 10 }).notNull(), // jpg, jpeg, png, tif, tiff
@@ -27,7 +27,9 @@ export const images = pgTable('images', {
     height: number;
   }[]>().default([]),
 
-});
+}, (table) => ({
+  uniqueUuidStatusDeletedAt: unique().on(table.uuid, table.status, table.deletedAt),
+}));
 
 // EXIF data table
 

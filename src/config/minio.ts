@@ -11,11 +11,11 @@ const minioClientInternal = new Minio.Client({
 
 
 const minioClient = new Minio.Client({
-    endPoint:'s3.192.168.0.24.nip.io',
-    port: 9999,
-    useSSL: false,
-    accessKey: 'admin',
-    secretKey: 'password'
+    endPoint: process.env.PUBLIC_MINIO_ENDPOINT || 's3.192.168.0.24.nip.io',
+    port: parseInt(process.env.PUBLIC_MINIO_PORT || '9999'),
+    useSSL: process.env.MINIO_USE_SSL === 'true',
+    accessKey: process.env.MINIO_ACCESS_KEY || 'admin',
+    secretKey: process.env.MINIO_SECRET_KEY || 'password'
 })
 
 
