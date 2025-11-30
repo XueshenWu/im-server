@@ -486,35 +486,45 @@ export async function createImageWithExif(
 function sanitizeExifData(exif: any): Omit<NewExifData, 'id' | 'uuid'> {
   const sanitized: any = {};
 
-  // String fields
-  if (exif.cameraMake !== undefined) sanitized.cameraMake = String(exif.cameraMake);
-  if (exif.cameraModel !== undefined) sanitized.cameraModel = String(exif.cameraModel);
-  if (exif.lensModel !== undefined) sanitized.lensModel = String(exif.lensModel);
-  if (exif.artist !== undefined) sanitized.artist = String(exif.artist);
-  if (exif.copyright !== undefined) sanitized.copyright = String(exif.copyright);
-  if (exif.software !== undefined) sanitized.software = String(exif.software);
-  if (exif.shutterSpeed !== undefined) sanitized.shutterSpeed = String(exif.shutterSpeed);
-  if (exif.aperture !== undefined) sanitized.aperture = String(exif.aperture);
-  if (exif.focalLength !== undefined) sanitized.focalLength = String(exif.focalLength);
+  // String fields - handle null values
+  if (exif.cameraMake !== undefined) sanitized.cameraMake = exif.cameraMake === null ? null : String(exif.cameraMake);
+  if (exif.cameraModel !== undefined) sanitized.cameraModel = exif.cameraModel === null ? null : String(exif.cameraModel);
+  if (exif.lensModel !== undefined) sanitized.lensModel = exif.lensModel === null ? null : String(exif.lensModel);
+  if (exif.artist !== undefined) sanitized.artist = exif.artist === null ? null : String(exif.artist);
+  if (exif.copyright !== undefined) sanitized.copyright = exif.copyright === null ? null : String(exif.copyright);
+  if (exif.software !== undefined) sanitized.software = exif.software === null ? null : String(exif.software);
+  if (exif.shutterSpeed !== undefined) sanitized.shutterSpeed = exif.shutterSpeed === null ? null : String(exif.shutterSpeed);
+  if (exif.aperture !== undefined) sanitized.aperture = exif.aperture === null ? null : String(exif.aperture);
+  if (exif.focalLength !== undefined) sanitized.focalLength = exif.focalLength === null ? null : String(exif.focalLength);
 
-  // Integer fields
+  // Integer fields - handle null values
   if (exif.iso !== undefined) {
-    const iso = parseInt(String(exif.iso), 10);
-    if (!isNaN(iso)) sanitized.iso = iso;
+    if (exif.iso === null) {
+      sanitized.iso = null;
+    } else {
+      const iso = parseInt(String(exif.iso), 10);
+      if (!isNaN(iso)) sanitized.iso = iso;
+    }
   }
   if (exif.orientation !== undefined) {
-    const orientation = parseInt(String(exif.orientation), 10);
-    if (!isNaN(orientation)) sanitized.orientation = orientation;
+    if (exif.orientation === null) {
+      sanitized.orientation = null;
+    } else {
+      const orientation = parseInt(String(exif.orientation), 10);
+      if (!isNaN(orientation)) sanitized.orientation = orientation;
+    }
   }
 
-  // Decimal fields
-  if (exif.gpsLatitude !== undefined) sanitized.gpsLatitude = String(exif.gpsLatitude);
-  if (exif.gpsLongitude !== undefined) sanitized.gpsLongitude = String(exif.gpsLongitude);
-  if (exif.gpsAltitude !== undefined) sanitized.gpsAltitude = String(exif.gpsAltitude);
+  // Decimal fields - handle null values
+  if (exif.gpsLatitude !== undefined) sanitized.gpsLatitude = exif.gpsLatitude === null ? null : String(exif.gpsLatitude);
+  if (exif.gpsLongitude !== undefined) sanitized.gpsLongitude = exif.gpsLongitude === null ? null : String(exif.gpsLongitude);
+  if (exif.gpsAltitude !== undefined) sanitized.gpsAltitude = exif.gpsAltitude === null ? null : String(exif.gpsAltitude);
 
   // Timestamp fields
   if (exif.dateTaken !== undefined) {
-    if (exif.dateTaken instanceof Date) {
+    if (exif.dateTaken === null) {
+      sanitized.dateTaken = null;
+    } else if (exif.dateTaken instanceof Date) {
       sanitized.dateTaken = exif.dateTaken;
     } else if (typeof exif.dateTaken === 'string') {
       const date = new Date(exif.dateTaken);

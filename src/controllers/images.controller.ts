@@ -132,7 +132,7 @@ export class ImagesController {
     const exif = await getExifByImageUUID(uuid);
 
     if (!exif) {
-      res.json({
+      return res.json({
         success: true,
         data: {},
       });
@@ -476,7 +476,9 @@ export class ImagesController {
         const { image, exif: existingExif } = imageData;
 
         // Sanitize EXIF data
+        console.log('Raw EXIF data:', JSON.stringify(rawExifData, null, 2));
         const exifData = sanitizeExifData(rawExifData);
+        console.log('Sanitized EXIF data:', JSON.stringify(exifData, null, 2));
 
         // Update or create EXIF data
         let updatedExif;
