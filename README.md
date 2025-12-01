@@ -73,6 +73,10 @@ Run the complete stack in detached mode:
 ```bash
 docker-compose up -d --build
 ```
+Or run the localhost version (firewall and wsl port forwarding not needed):
+```bash
+docker-compose -f docker-compose.local.yml up -d --build
+```
 
 
 ## 📦 Storage & Webhooks
