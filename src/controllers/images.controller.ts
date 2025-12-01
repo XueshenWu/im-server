@@ -36,6 +36,7 @@ import { eq, desc, sql, and, inArray, isNull, gte, lte } from 'drizzle-orm';
 /**
  * Sanitize EXIF data from user input
  * Removes fields that should be auto-generated or determined server-side
+ * Converts date strings to Date objects
  */
 function sanitizeExifData(rawExifData: any) {
   const {
@@ -43,6 +44,17 @@ function sanitizeExifData(rawExifData: any) {
     imageId,      // Determined from UUID
     ...cleanExifData
   } = rawExifData;
+
+  // Convert date fields from string to Date object if needed
+  if (cleanExifData.dateTaken) {
+    if (typeof cleanExifData.dateTaken === 'string') {
+      cleanExifData.dateTaken = new Date(cleanExifData.dateTaken);
+    } else if (!(cleanExifData.dateTaken instanceof Date)) {
+      // If it's not a string or Date, remove it to avoid errors
+      delete cleanExifData.dateTaken;
+    }
+  }
+
   return cleanExifData;
 }
 
