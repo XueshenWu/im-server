@@ -1,385 +1,113 @@
-# API Server - Image Management
+# Image Management Backend Services
 
-Backend API server for the Image Management Electron application with **Drizzle ORM**.
+![Docker](https://img.shields.io/badge/docker-compose-blue) ![Node](https://img.shields.io/badge/node-22-green) ![Drizzle](https://img.shields.io/badge/orm-drizzle-yellow) ![MinIO](https://img.shields.io/badge/storage-minio-red)
 
-## Tech Stack
+This directory hosts the server-side infrastructure for the Image Management Desktop App. It is a containerized environment handling data persistence, image storage (TIFF/PNG/JPEG), and synchronization logic.
 
-- **Node.js** with **TypeScript**
-- **Drizzle ORM** - Type-safe database queries
-- **PostgreSQL** - Database (via Docker)
-- **tsx** - TypeScript execution for development
+## 🏗 Architecture
 
-## Quick Start
+The backend runs entirely in Docker. **Nginx** acts as the reverse proxy to handle routing between the API and the Object Storage using subdomain resolution.
 
-### 1. Install Dependencies
+### Service Port Mappings
+
+| Service      | Container Name       | Internal Port | Host Port     | Description                                     |
+| :----------- | :------------------- | :------------ | :------------ | :---------------------------------------------- |
+| **API**      | `image-mgmt-api`     | 3000          | **3000**      | Express.js server (Business logic, Auth, Sync). |
+| **Database** | `image-mgmt-db`      | 5432          | **5430**      | PostgreSQL 16 (Managed via Drizzle ORM).        |
+| **Storage**  | `image-mgmt-storage` | 9000/9001     | **9000/9001** | MinIO (S3-compatible storage for Images).       |
+| **Cache**    | `image-mgmt-redis`   | 6379          | **6370**      | Redis (Job queues, Caching).                    |
+| **Gateway**  | `image-mgmt-nginx`   | 80            | **9999**      | Nginx Reverse Proxy (Handles routing).          |
+
+### Domain Resolution Strategy
+We use **nip.io** to allow wildcard subdomains on a local network IP without a DNS server.
+* **Base Domain:** `192.168.0.24.nip.io` (Configurable via `.env`)
+* **API URL:** `http://192.168.0.24.nip.io:9999`
+* **Storage URL:** `http://s3.192.168.0.24.nip.io:9999`
+* **MinIO Console URL:** `http://console.192.168.0.24.nip.io:9999`
+
+## 🛠 Tech Stack
+
+* **Runtime:** Node.js v22 (Alpine Linux)
+* **Framework:** Express.js
+* **Database:** PostgreSQL + Drizzle ORM
+* **Storage:** MinIO (Supports Multi-page TIFF, PNG, JPEG)
+* **Infrastructure:** Docker Compose
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+* Docker & Docker Compose
+* Node.js v22 (for local development outside containers)
+
+### 2. Environment Configuration
+Copy the example environment file and configure your local IP.
 
 ```bash
-cd server
-npm install
+cp .env.example .env
+# Your local machine's LAN IP (Run `ipconfig` or `ifconfig` to find this)
+BASE_DOMAIN=192.168.0.24.nip.io
+PUBLIC_PORT=9999
+
+# Database Credentials
+DB_USER=postgres
+DB_PASSWORD=postgres
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres
+
+# MinIO Keys
+MINIO_ACCESS_KEY=admin
+MINIO_SECRET_KEY=password
 ```
 
-### 2. Set Up Environment
-
+### 3. Database Migrations
 ```bash
-# Copy the example env file
-copy .env.example .env
-
-# Edit .env if needed (default values should work)
-```
-
-### 3. Start PostgreSQL (Docker)
-
-```bash
-# From the project root directory
-docker-compose up -d
-```
-
-### 4. Push Database Schema
-
-```bash
-# This will create all tables in the database
+# Run migration from your host machine
 npm run db:push
+
+# OR run it inside the container if you don't have Node installed locally
+docker exec -it image-mgmt-api npm run db:push
 ```
 
-### 5. Test the Connection
 
+### 4. Start the Infrastructure
+Run the complete stack in detached mode:
 ```bash
-npm test
+docker-compose up -d --build
 ```
 
-### 6. Start Development Server (when you create the API)
 
+## 📦 Storage & Webhooks
+he system uses MinIO buckets to store raw images and thumbnails.
+
+Bucket Policy: Public read access is generally required for the Electron renderer to display images via URL.
+
+Webhooks: MinIO is configured to send event notifications to the API when a file is uploaded.
+
+Endpoint: http://host.docker.internal:3000/webhook/minio
+
+Trigger: PUT, POST (Uploads)
+
+
+## 🐛 Troubleshooting
+1. "Connection Refused" on Subdomains Ensure your BASE_DOMAIN in .env matches your actual LAN IP. If your IP changes, you must update the .env file and restart containers.
+
+2. Nginx cannot connect to Upstreams If Nginx logs show "host not found", ensure all containers are on the default bridge network created by docker-compose.
+
+3. Database connection fails during dev If connecting from your host machine (e.g., Drizzle Studio), use port 5430. If connecting from inside Docker (e.g., the API), use port 5432.
+4. Cannot access the App/MinIO from other devices
+**Cause:** Windows Defender Firewall blocks ports exposed by Docker/WSL by default.
+**Solution:** You need to allow the ports through the Windows Firewall. Run this in **PowerShell as Administrator**:
+
+## 🧪 Development Commands
 ```bash
-npm run dev
+# Rebuild containers after code changes
+docker-compose up -d --build api
+
+# View logs for the API service
+docker-compose logs -f api
+
+# View logs for Nginx gateway
+docker-compose logs -f nginx
+
+# Open MinIO Console
+# Go to [http://console.192.168.0.24.nip.io:9999](http://console.192.168.0.24.nip.io:9999)
 ```
-
-## Drizzle ORM Commands
-
-### Push Schema to Database
-```bash
-npm run db:push
-```
-Pushes your Drizzle schema to the database (creates/updates tables).
-
-### Generate Migrations
-```bash
-npm run db:generate
-```
-Generates migration SQL files based on schema changes.
-
-### Run Migrations
-```bash
-npm run db:migrate
-```
-Applies pending migrations to the database.
-
-### Open Drizzle Studio
-```bash
-npm run db:studio
-```
-Opens a visual database browser at `https://local.drizzle.studio`
-
-### Drop Database
-```bash
-npm run db:drop
-```
-⚠️ **Warning**: Drops all tables from the database.
-
-## Project Structure
-
-```
-server/
-├── src/
-│   ├── db/
-│   │   ├── schema.ts      # Database schema (tables, relations)
-│   │   ├── index.ts       # Database connection
-│   │   └── queries.ts     # Reusable query functions
-│   ├── test.ts            # Database connection test
-│   └── index.ts           # (To be created) API server entry point
-├── database/
-│   └── init/              # SQL initialization scripts (legacy)
-├── drizzle/               # Generated migrations
-├── drizzle.config.ts      # Drizzle Kit configuration
-├── tsconfig.json          # TypeScript configuration
-├── package.json           # Dependencies and scripts
-└── .env                   # Environment variables
-```
-
-## Database Schema
-
-### Tables
-
-**`images`** - Stores image metadata
-- id, uuid, filename, originalName, filePath, thumbnailPath
-- fileSize, format, width, height, hash, mimeType
-- isCorrupted, createdAt, updatedAt, deletedAt
-
-**`exif_data`** - Stores EXIF metadata
-- imageId (FK to images), cameraMake, cameraModel, lensModel
-- iso, shutterSpeed, aperture, focalLength, dateTaken
-- gpsLatitude, gpsLongitude, gpsAltitude, orientation
-- metadata (JSONB for additional data)
-
-**`sync_log`** - Tracks sync operations
-- operation, imageId, status, errorMessage
-- metadata (JSONB), createdAt, completedAt
-
-See [src/db/schema.ts](./src/db/schema.ts) for complete schema.
-
-## Using the Queries
-
-The [src/db/queries.ts](./src/db/queries.ts) file contains type-safe query functions:
-
-```typescript
-import {
-  getAllImages,
-  getImageById,
-  createImage,
-  createImageWithExif,
-  getImageStats
-} from './db/queries';
-
-// Get all images
-const images = await getAllImages();
-
-// Get single image
-const image = await getImageById(1);
-
-// Create new image
-const newImage = await createImage({
-  filename: 'photo.jpg',
-  originalName: 'vacation.jpg',
-  filePath: '/storage/images/photo.jpg',
-  fileSize: 2048000,
-  format: 'jpg',
-  width: 1920,
-  height: 1080,
-  hash: 'abc123...',
-  // ... other fields
-});
-
-// Get statistics
-const stats = await getImageStats();
-console.log(stats); // { totalCount, totalSize, corruptedCount, ... }
-```
-
-All queries are **fully type-safe** with TypeScript autocomplete!
-
-## PostgreSQL Docker Setup
-
-### Prerequisites
-
-- Docker Desktop installed and running
-- Docker Compose V2 (included with Docker Desktop)
-
-### Quick Start
-
-1. **Copy the environment file**:
-   ```bash
-   cd apiserver
-   copy .env.example .env
-   ```
-
-2. **Review and modify `.env` if needed** (optional):
-   - Change default database credentials
-   - Adjust storage paths
-   - Configure other settings
-
-3. **Start PostgreSQL**:
-   ```bash
-   # From the project root directory
-   docker-compose up -d
-   ```
-
-4. **Verify PostgreSQL is running**:
-   ```bash
-   docker-compose ps
-   ```
-
-   You should see the `image-mgmt-db` container running.
-
-5. **Check logs** (if needed):
-   ```bash
-   docker-compose logs -f postgres
-   ```
-
-### Database Schema
-
-The database will be automatically initialized with the following tables:
-
-- **`images`**: Stores image metadata (filename, size, format, hash, etc.)
-- **`exif_data`**: Stores EXIF metadata extracted from images
-- **`sync_log`**: Tracks synchronization operations
-
-See [database/init/01-init-schema.sql](./database/init/01-init-schema.sql) for complete schema details.
-
-### Storage Structure
-
-```
-storage/
-├── images/         # Original uploaded images
-└── thumbnails/     # Generated thumbnails
-```
-
-### Connecting to PostgreSQL
-
-**Default connection details**:
-- Host: `localhost`
-- Port: `5432`
-- Database: `imagedb`
-- User: `imageadmin`
-- Password: `imagepass`
-
-**Connection URL**:
-```
-postgresql://imageadmin:imagepass@localhost:5432/imagedb
-```
-
-### Useful Commands
-
-**Start the database**:
-```bash
-docker-compose up -d
-```
-
-**Stop the database**:
-```bash
-docker-compose down
-```
-
-**Stop and remove all data** (⚠️ destructive):
-```bash
-docker-compose down -v
-```
-
-**View logs**:
-```bash
-docker-compose logs -f postgres
-```
-
-**Access PostgreSQL CLI**:
-```bash
-docker-compose exec postgres psql -U imageadmin -d imagedb
-```
-
-**Restart database**:
-```bash
-docker-compose restart postgres
-```
-
-**Check database health**:
-```bash
-docker-compose exec postgres pg_isready -U imageadmin -d imagedb
-```
-
-### Common PostgreSQL Commands
-
-Once inside the PostgreSQL CLI (`psql`):
-
-```sql
--- List all tables
-\dt
-
--- Describe a table
-\d images
-
--- View all images
-SELECT * FROM images;
-
--- View images with EXIF data (using the view)
-SELECT * FROM v_images_with_exif;
-
--- Count total images
-SELECT COUNT(*) FROM images;
-
--- Exit psql
-\q
-```
-
-### Troubleshooting
-
-**Problem: Port 5432 already in use**
-
-Solution: Change the port in `docker-compose.yml`:
-```yaml
-ports:
-  - "5433:5432"  # Use port 5433 instead
-```
-
-Then update `DATABASE_URL` in `.env`:
-```
-DATABASE_URL=postgresql://imageadmin:imagepass@localhost:5433/imagedb
-```
-
-**Problem: Permission denied on storage volumes**
-
-Solution: Ensure the storage directories exist and have proper permissions:
-```bash
-mkdir -p ../storage/images ../storage/thumbnails
-```
-
-**Problem: Database initialization failed**
-
-Solution: Remove the volume and recreate:
-```bash
-docker-compose down -v
-docker-compose up -d
-```
-
-**Problem: Can't connect from API server**
-
-Solution: Check that:
-1. Container is running: `docker-compose ps`
-2. Port is correctly mapped: `docker-compose port postgres 5432`
-3. `.env` file has correct credentials
-4. Firewall is not blocking port 5432
-
-### Database Backup & Restore
-
-**Backup**:
-```bash
-docker-compose exec postgres pg_dump -U imageadmin imagedb > backup.sql
-```
-
-**Restore**:
-```bash
-docker-compose exec -T postgres psql -U imageadmin imagedb < backup.sql
-```
-
-### Data Persistence
-
-Database data is persisted in a Docker volume named `postgres_data`.
-
-To view volume information:
-```bash
-docker volume inspect image-management_postgres_data
-```
-
-The volume will persist even if you run `docker-compose down`. To remove it, use:
-```bash
-docker-compose down -v
-```
-
-### Next Steps
-
-After setting up PostgreSQL:
-
-1. Install API server dependencies (see main project README)
-2. Configure the API server to connect to the database
-3. Start the Express.js API server
-4. Run the Electron application
-
-## Security Notes
-
-⚠️ **For Development Only**: The default credentials are for development purposes only. In production:
-
-- Use strong, unique passwords
-- Store credentials in environment variables
-- Never commit `.env` files to version control
-- Use SSL/TLS for database connections
-- Implement proper authentication and authorization
-- Regularly update PostgreSQL to the latest version
-
-## License
-
-See main project LICENSE file.

@@ -1,0 +1,129 @@
+version: "3.8"
+
+services:
+  # --- API Service ---
+  api:
+    container_name: image-mgmt-api
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Default to 127.0.0.1.nip.io so it works on localhost instantly
+      - BASE_DOMAIN=${BASE_DOMAIN:-127.0.0.1.nip.io}
+      - PUBLIC_PORT=${PUBLIC_PORT:-9999}
+
+      # Internal Docker DNS names (No need to change these)
+      - REDIS_HOST=image-mgmt-redis
+      - REDIS_PORT=6379
+      - DB_HOST=image-mgmt-db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=postgres
+      - DATABASE_URL=postgresql://postgres:postgres@image-mgmt-db:5432/postgres
+
+      # MinIO Internal Config
+      - MINIO_ENDPOINT=image-mgmt-storage
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=password
+
+      # Public URLs (What the browser/frontend sees)
+      - PUBLIC_MINIO_ENDPOINT=s3.${BASE_DOMAIN:-127.0.0.1.nip.io}
+      - PUBLIC_MINIO_PORT=${PUBLIC_PORT:-9999}
+      - PUBLIC_MINIO_URL=http://s3.${BASE_DOMAIN:-127.0.0.1.nip.io}:${PUBLIC_PORT:-9999}
+
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => {if(!r.ok) process.exit(1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # --- Database ---
+  postgres:
+    image: postgres:16-alpine
+    container_name: image-mgmt-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5430:5432" 
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Cache ---
+  redis:
+    image: redis:7-alpine
+    container_name: image-mgmt-redis
+    ports:
+      - "6370:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  # --- Storage ---
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: image-mgmt-storage
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: "admin"
+      MINIO_ROOT_PASSWORD: "password"
+
+      # Public URLs (Browser Access)
+      MINIO_SERVER_URL: "http://s3.${BASE_DOMAIN:-127.0.0.1.nip.io}:${PUBLIC_PORT:-9999}"
+      MINIO_BROWSER_REDIRECT_URL: "http://console.${BASE_DOMAIN:-127.0.0.1.nip.io}:${PUBLIC_PORT:-9999}"
+
+      # Internal Webhook (Container-to-Container)
+      # Points directly to 'image-mgmt-api' container instead of host
+      MINIO_NOTIFY_WEBHOOK_ENABLE_primary: "on"
+      MINIO_NOTIFY_WEBHOOK_ENDPOINT_primary: "http://image-mgmt-api:3000/webhook/minio"
+      MINIO_NOTIFY_WEBHOOK_QUEUE_LIMIT_primary: "0"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # --- Gateway ---
+  nginx:
+    image: nginx:alpine
+    container_name: image-mgmt-nginx
+    ports:
+      - "${PUBLIC_PORT:-9999}:80"
+    environment:
+      - BASE_DOMAIN=${BASE_DOMAIN:-127.0.0.1.nip.io}
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      - minio
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
