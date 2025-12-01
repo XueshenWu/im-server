@@ -12,10 +12,10 @@ The backend runs entirely in Docker. **Nginx** acts as the reverse proxy to hand
 
 | Service      | Container Name       | Internal Port | Host Port     | Description                                     |
 | :----------- | :------------------- | :------------ | :------------ | :---------------------------------------------- |
-| **API**      | `image-mgmt-api`     | 3000          | **3000**      | Express.js server (Business logic, Auth, Sync). |
+| **API**      | `image-mgmt-api`     | 3000          | **3000**      | Express.js server (Business logic, Sync). |
 | **Database** | `image-mgmt-db`      | 5432          | **5430**      | PostgreSQL 16 (Managed via Drizzle ORM).        |
-| **Storage**  | `image-mgmt-storage` | 9000/9001     | **9000/9001** | MinIO (S3-compatible storage for Images).       |
-| **Cache**    | `image-mgmt-redis`   | 6379          | **6370**      | Redis (Job queues, Caching).                    |
+| **Storage**  | `image-mgmt-storage` | 9000/9001     | **9000/9001** | MinIO (self-hosted S3-compatible storage for Images).       |
+| **Cache**    | `image-mgmt-redis`   | 6379          | **6370**      | Redis (Distributed lock and in-flight image upload session).                    |
 | **Gateway**  | `image-mgmt-nginx`   | 80            | **9999**      | Nginx Reverse Proxy (Handles routing).          |
 
 ### Domain Resolution Strategy
